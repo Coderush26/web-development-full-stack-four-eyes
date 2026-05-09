@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import { applyTacticalAudioLevel, stopTacticalAudio } from '../src/services/audio/tacticalAudio';
+import audioManager from '../src/services/audio/audioManager';
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
 export function useFleetSocket(shipId) {
@@ -98,7 +98,7 @@ export function useFleetSocket(shipId) {
     return () => {
       cancelled = true;
       clearInterval(healthTimer);
-      stopTacticalAudio();
+      audioManager.stopAll();
       socket.disconnect();
     };
   }, [shipId]);
@@ -121,14 +121,14 @@ export function useFleetSocket(shipId) {
 
     const emergencyActive = emergencyBroadcast && (Date.now() - emergencyBroadcast.timestamp) < 20_000;
     if (emergencyActive) {
-      applyTacticalAudioLevel('emergency');
+      audioManager.setSeverity('EMERGENCY');
       return;
     }
 
     const merged = Math.max(highestAlertSeverity, highestRouteThreat);
-    if (merged >= 4) applyTacticalAudioLevel('critical');
-    else if (merged >= 2) applyTacticalAudioLevel('warning');
-    else applyTacticalAudioLevel('normal');
+    if (merged >= 4) audioManager.setSeverity('CRITICAL');
+    else if (merged >= 2) audioManager.setSeverity('WARNING');
+    else audioManager.setSeverity('NORMAL');
   }, [alerts, routeIntelligenceByShip, emergencyBroadcast]);
 
   const sendDirective = useCallback((targetShipId, action, params) => {

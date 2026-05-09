@@ -405,6 +405,7 @@ html, body, #__next {
   border-radius: 14px;
   padding: 12px;
   backdrop-filter: blur(12px);
+  will-change: transform;
 }
 
 .pris-ops-panel {
@@ -421,12 +422,22 @@ html, body, #__next {
   backdrop-filter: blur(12px);
   display: flex;
   flex-direction: column;
+  will-change: transform;
 }
 
 .pris-ops-header {
   display: flex;
   justify-content: space-between;
   margin-bottom: 8px;
+}
+
+.panel-drag-handle {
+  cursor: grab;
+  user-select: none;
+}
+
+.panel-drag-handle:active {
+  cursor: grabbing;
 }
 
 .pris-ops-header strong { font-size: 0.82rem; color: #c4b5fd; }

@@ -56,6 +56,11 @@ export default function CommandPage() {
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [isReplaying, setIsReplaying] = useState(false);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
+  const [panelOffsets, setPanelOffsets] = useState({
+    ai: { x: 0, y: 0 },
+    pris: { x: 0, y: 0 }
+  });
+  const [draggingPanel, setDraggingPanel] = useState(null);
 
   useEffect(() => { console.log('[PHASE 9 COMPLETE]'); }, []);
 
@@ -136,6 +141,19 @@ export default function CommandPage() {
   }, [unackedAlerts, sortedShips]);
 
   const aiFeed = useMemo(() => {
+    const streamFeed = Object.values(routeIntelligenceByShip || {}).map((update) => {
+      const riskScore = update?.routeAnalysis?.riskScore ?? 0;
+      const severity = riskScore >= 75 ? 'critical' : riskScore >= 45 ? 'warning' : 'normal';
+      return {
+        id: `stream-${update.shipId}-${update.timestamp}`,
+        timestamp: update.timestamp || Date.now(),
+        severity,
+        threat: `${update.shipId}: ${update.routeAnalysis?.threatLevel || 'LOW'} predictive risk`,
+        confidence: update.routeAnalysis?.confidence ?? 0,
+        recommendation: update.routeAnalysis?.recommendation?.reason || 'Maintain active monitoring corridor.'
+      };
+    });
+
     const synthesizedFromAlerts = unackedAlerts.slice(0, 6).map((alert) => ({
       id: alert.id,
       timestamp: alert.createdAt || alert.timestamp || Date.now(),
@@ -163,10 +181,10 @@ export default function CommandPage() {
         : 'Monitor telemetry and apply captain guidance protocol.'
     }));
 
-    return [...distressFeed, ...synthesizedFromAlerts]
+    return [...streamFeed, ...distressFeed, ...synthesizedFromAlerts]
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, 8);
-  }, [unackedAlerts, distressEvents]);
+  }, [unackedAlerts, distressEvents, routeIntelligenceByShip]);
 
   const tacticalInspection = useMemo(() => {
     if (!liveInspected) return { enabled: false };
@@ -257,6 +275,36 @@ export default function CommandPage() {
     }, Math.max(300, 1300 / playbackSpeed));
     return () => clearInterval(id);
   }, [isReplaying, snapshots, playbackSpeed]);
+
+  useEffect(() => {
+    if (!draggingPanel) return undefined;
+
+    const onMove = (event) => {
+      setPanelOffsets((prev) => ({
+        ...prev,
+        [draggingPanel.key]: {
+          x: prev[draggingPanel.key].x + (event.clientX - draggingPanel.lastX),
+          y: prev[draggingPanel.key].y + (event.clientY - draggingPanel.lastY)
+        }
+      }));
+      setDraggingPanel((prev) => (prev
+        ? { ...prev, lastX: event.clientX, lastY: event.clientY }
+        : prev));
+    };
+
+    const onUp = () => setDraggingPanel(null);
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [draggingPanel]);
+
+  const startDrag = useCallback((key, event) => {
+    setDraggingPanel({ key, lastX: event.clientX, lastY: event.clientY });
+  }, []);
 
   return (
     <div className={`layout ${isSidebarExpanded ? '' : 'collapsed'} op-${activeIncident?.severityLevel || 'normal'} ${emergencyBroadcast ? 'system-emergency' : ''}`}>
@@ -368,8 +416,8 @@ export default function CommandPage() {
           </section>
         )}
 
-        <section className="ai-command-panel">
-          <div className="ai-command-header">
+        <section className="ai-command-panel" style={{ transform: `translate(${panelOffsets.ai.x}px, ${panelOffsets.ai.y}px)` }}>
+          <div className="ai-command-header panel-drag-handle" onMouseDown={(event) => startDrag('ai', event)}>
             <strong>AI Command Intelligence</strong>
             <span>live telemetry analysis</span>
           </div>
@@ -399,21 +447,32 @@ export default function CommandPage() {
             </article>
           ) : null}
           <div className="ai-feed-list">
-            {aiFeed.map((item) => (
-              <article key={item.id} className={`ai-feed-card severity-${item.severity}`}>
+            {aiFeed.length === 0 ? (
+              <article className="ai-feed-card severity-normal">
                 <div className="ai-feed-top">
-                  <span>{item.threat}</span>
-                  <span>{item.confidence}%</span>
+                  <span>No immediate threat signals</span>
+                  <span>--</span>
                 </div>
-                <p>{item.recommendation}</p>
-                <small>{new Date(item.timestamp).toLocaleTimeString()}</small>
+                <p>Select a vessel to start PRIS route intelligence analysis.</p>
+                <small>{new Date().toLocaleTimeString()}</small>
               </article>
-            ))}
+            ) : (
+              aiFeed.map((item) => (
+                <article key={item.id} className={`ai-feed-card severity-${item.severity}`}>
+                  <div className="ai-feed-top">
+                    <span>{item.threat}</span>
+                    <span>{item.confidence}%</span>
+                  </div>
+                  <p>{item.recommendation}</p>
+                  <small>{new Date(item.timestamp).toLocaleTimeString()}</small>
+                </article>
+              ))
+            )}
           </div>
         </section>
 
-        <section className="pris-ops-panel">
-          <div className="pris-ops-header">
+        <section className="pris-ops-panel" style={{ transform: `translate(${panelOffsets.pris.x}px, ${panelOffsets.pris.y}px)` }}>
+          <div className="pris-ops-header panel-drag-handle" onMouseDown={(event) => startDrag('pris', event)}>
             <strong>PRIS Intelligence Control</strong>
             <span>OPERATOR CONTROL + WORKLOAD MGMT</span>
           </div>
