@@ -28,6 +28,11 @@ function scoreFromAlert(alert) {
   return 1;
 }
 
+function formatLocalTime(timestamp) {
+  if (!timestamp) return '--';
+  return new Date(timestamp).toLocaleTimeString();
+}
+
 export default function CommandPage() {
   const {
     ships,
@@ -61,8 +66,16 @@ export default function CommandPage() {
     pris: { x: 0, y: 0 }
   });
   const [draggingPanel, setDraggingPanel] = useState(null);
+  const [clientClock, setClientClock] = useState('--');
 
   useEffect(() => { console.log('[PHASE 9 COMPLETE]'); }, []);
+
+  useEffect(() => {
+    const updateClock = () => setClientClock(new Date().toLocaleTimeString());
+    updateClock();
+    const id = setInterval(updateClock, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -402,7 +415,7 @@ export default function CommandPage() {
             </div>
             <div className="incident-focus-meta">
               <span>Severity: {activeIncident.severityLevel.toUpperCase()}</span>
-              <span>{new Date(activeIncident.createdAt || Date.now()).toLocaleTimeString()}</span>
+              <span>{formatLocalTime(activeIncident.createdAt)}</span>
             </div>
             <p>{activeIncident.message || 'An anomaly requires immediate command action.'}</p>
             <div className="incident-focus-actions">
@@ -454,7 +467,7 @@ export default function CommandPage() {
                   <span>--</span>
                 </div>
                 <p>Select a vessel to start PRIS route intelligence analysis.</p>
-                <small>{new Date().toLocaleTimeString()}</small>
+                <small>{clientClock}</small>
               </article>
             ) : (
               aiFeed.map((item) => (
@@ -464,7 +477,7 @@ export default function CommandPage() {
                     <span>{item.confidence}%</span>
                   </div>
                   <p>{item.recommendation}</p>
-                  <small>{new Date(item.timestamp).toLocaleTimeString()}</small>
+                  <small>{formatLocalTime(item.timestamp)}</small>
                 </article>
               ))
             )}

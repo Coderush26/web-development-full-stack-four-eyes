@@ -7,11 +7,22 @@ const FleetMap = dynamic(() => import('../components/FleetMap'), { ssr: false })
 
 export default function CaptainPage() {
   const router = useRouter();
-  const shipId = typeof router.query.ship === 'string' ? router.query.ship : '';
+  const shipId = useMemo(() => {
+    if (typeof router.query.ship !== 'string') {
+      return '';
+    }
+    return decodeURIComponent(router.query.ship).trim();
+  }, [router.query.ship]);
   const { ships, zones, directives, respondDirective, connected, backendHealthy, socketUrl } = useFleetSocket(shipId || undefined);
   const [distressText, setDistressText] = useState('');
   const [distressResult, setDistressResult] = useState(null);
-  const ownShip = useMemo(() => ships.find((ship) => ship.id === shipId), [ships, shipId]);
+  const ownShip = useMemo(() => {
+    const target = shipId.toUpperCase();
+    return ships.find((ship) => {
+      const id = String(ship.id || ship.shipId || '').trim().toUpperCase();
+      return id === target;
+    });
+  }, [ships, shipId]);
   const latestDirective = shipId ? directives[shipId] : undefined;
 
   if (!shipId) {
@@ -41,7 +52,7 @@ export default function CaptainPage() {
         </div>
       </header>
 
-      {!ownShip ? <p>Loading ship telemetry...</p> : (
+      {!ownShip ? <p>Loading ship telemetry for {shipId}...</p> : (
         <div className="captain-grid">
           <section className="panel">
             <h3>{ownShip.name} ({ownShip.id})</h3>

@@ -21,6 +21,7 @@
     "react-leaflet": "4.2.1",
     "leaflet-draw": "1.0.4",
     "@turf/turf": "6.5.0",
-    "@anthropic-ai/sdk": "0.20.9"
+    "@anthropic-ai/sdk": "0.20.9",
+    "firebase": "^11.10.0"
   }
 }

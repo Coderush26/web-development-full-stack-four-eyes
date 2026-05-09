@@ -27,7 +27,7 @@ export default function AlertPanel({ alerts, onAck }) {
               ? `${alert.shipId} entered ${alert.zoneName}`
               : `${alert.ship1Id} ↔ ${alert.ship2Id}`)}
           </div>
-          <small>{new Date(alert.timestamp || Date.now()).toLocaleTimeString()}</small>
+          <small>{alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : '--'}</small>
           <div style={{ marginTop: 6 }}>
             <button className="btn-danger" type="button" onClick={() => onAck(alert.id)} style={{ fontSize: '0.68rem', padding: '4px 10px' }}>
               Acknowledge
