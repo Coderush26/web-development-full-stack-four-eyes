@@ -63,7 +63,6 @@ io.on('connection', (socket) => {
       shipId,
       fromRole: 'command',
       action,
-      params,
       timestamp: Date.now()
     };
     latestDirectives.set(shipId, directive);
