@@ -7,5 +7,6 @@ services:
       - "3000:3000"
       - "3001:3001"
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL}
     restart: unless-stopped

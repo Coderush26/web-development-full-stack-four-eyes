@@ -6,13 +6,17 @@ VesselSync is a real-time fleet command dashboard for maritime vessel monitoring
 
 Required:
 
-- `ANTHROPIC_API_KEY` (from console.anthropic.com)
+- `OPENROUTER_API_KEY` (from openrouter.ai)
+- (Compatibility) `ANTHROPIC_API_KEY` is also accepted by `/api/distress` as a fallback key name.
 
 Create `.env.local`:
 
 ```bash
-ANTHROPIC_API_KEY=your_key_here
+OPENROUTER_API_KEY=your_key_here
+OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct:free
 ```
+
+`OPENROUTER_MODEL` is optional; default is a free OpenRouter model.
 
 ## Run locally
 

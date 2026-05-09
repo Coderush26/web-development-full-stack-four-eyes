@@ -1,5 +1,8 @@
 node_modules
 .next
 .env.local
+<<<<<<< HEAD
 .env
 npm-debug.log*
+=======
+>>>>>>> 42f7949431a2196b5ce758ea96b514f1c6703e01

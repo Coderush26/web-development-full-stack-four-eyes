@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fleet Command — Knowledge Graph</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#0b0f1a; color:#e2e8f0; font-family:'Inter',sans-serif; overflow:hidden; }
+#canvas { width:100vw; height:100vh; }
+#info { position:fixed; top:16px; left:16px; background:rgba(15,23,42,0.9); border:1px solid #1e293b; border-radius:12px; padding:16px; width:320px; max-height:90vh; overflow-y:auto; }
+h1 { font-size:1rem; color:#00f2fe; margin-bottom:8px; }
+#detail { position:fixed; top:16px; right:16px; background:rgba(15,23,42,0.95); border:1px solid #334155; border-radius:12px; padding:16px; width:300px; display:none; }
+#detail h2 { color:#00f2fe; font-size:0.9rem; margin-bottom:8px; }
+#detail p { font-size:0.8rem; color:#94a3b8; line-height:1.5; }
+#detail .tag { display:inline-block; background:#1e293b; border-radius:4px; padding:2px 6px; font-size:0.7rem; margin:2px; color:#7dd3fc; }
+.legend { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.dot { width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:4px; }
+.leg-item { font-size:0.75rem; display:flex; align-items:center; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="info">
+  <h1>⚓ Fleet Command — Dependency Graph</h1>
+  <p style="font-size:0.75rem;color:#64748b;margin-bottom:8px;">Click a node to inspect. Drag to pan. Scroll to zoom.</p>
+  <div class="legend">
+    <span class="leg-item"><span class="dot" style="background:#f97316"></span>entrypoint</span>
+    <span class="leg-item"><span class="dot" style="background:#3b82f6"></span>module</span>
+    <span class="leg-item"><span class="dot" style="background:#8b5cf6"></span>hook</span>
+    <span class="leg-item"><span class="dot" style="background:#10b981"></span>page</span>
+    <span class="leg-item"><span class="dot" style="background:#ec4899"></span>api</span>
+    <span class="leg-item"><span class="dot" style="background:#eab308"></span>component</span>
+    <span class="leg-item"><span class="dot" style="background:#6b7280"></span>data</span>
+  </div>
+</div>
+<div id="detail">
+  <h2 id="d-title"></h2>
+  <p id="d-desc"></p>
+  <div id="d-exports" style="margin-top:8px;"></div>
+  <div id="d-imports" style="margin-top:8px;"></div>
+</div>
+<script>
+const COLORS = { entrypoint:'#f97316', module:'#3b82f6', hook:'#8b5cf6', page:'#10b981', api:'#ec4899', component:'#eab308', data:'#6b7280' };
+const NODES = [
+  { id:'server.js', type:'entrypoint', x:500, y:300, desc:'Entry point. Express :3001 (Socket.IO). Next.js :3000. Owns zones[] and latestDirectives Map.', exports:[], imports:['lib/simulator','lib/geofence','lib/router','lib/playback'] },
+  { id:'lib/simulator.js', type:'module', x:700, y:200, desc:'1s tick engine. Owns fleet[] in memory. Advances ships. Burns fuel. Calls geofence/router/weather/playback.', exports:['startTick','getAllShips','getShip','updateShip'], imports:['lib/geofence','lib/router','lib/weather','lib/playback'] },
+  { id:'lib/router.js', type:'module', x:850, y:100, desc:'8-waypoint deflection routing. Perpendicular deflection ±0.3° around zones. Checks NAVIGABLE_WATER.', exports:['computePath'], imports:['@turf/turf'] },
+  { id:'lib/geofence.js', type:'module', x:850, y:300, desc:'Geofence O(N*M) + proximity O(N²). Emits socket alerts. Returns reroute ship IDs.', exports:['init','checkAll'], imports:['@turf/turf'] },
+  { id:'lib/weather.js', type:'module', x:850, y:450, desc:'Open-Meteo API. 60s Map cache by rounded lat:lng. Returns { adverse, windSpeed }.', exports:['fetchWeather'], imports:[] },
+  { id:'lib/playback.js', type:'module', x:700, y:450, desc:'Ring buffer. Deep clone every 30s. Max 120 snapshots (60 min). GET /api/playback.', exports:['maybeSnapshot','getSnapshots'], imports:[] },
+  { id:'hooks/useFleetSocket.js', type:'hook', x:300, y:200, desc:'Client data hub. All socket events. Returns ships, alerts, zones, directives, connected + action fns.', exports:['useFleetSocket'], imports:['socket.io-client'] },
+  { id:'pages/command.js', type:'page', x:100, y:150, desc:'HQ dashboard. Full-width map + alert panel + ship list. Issues directives. Draws zones.', exports:['CommandPage'], imports:['useFleetSocket','FleetMap','AlertPanel','DirectiveModal'] },
+  { id:'pages/captain.js', type:'page', x:100, y:300, desc:'Captain terminal. Own ship telemetry only. Accept/Escalate directives. POST /api/distress.', exports:['CaptainPage'], imports:['useFleetSocket'] },
+  { id:'pages/index.js', type:'page', x:100, y:450, desc:'Landing portal. Routes to /command or /captain?ship=ID.', exports:['Home'], imports:[] },
+  { id:'pages/api/distress.js', type:'api', x:300, y:500, desc:'POST handler. Claude Haiku 4.5. Returns { severity, incidentType, injuries, damagePct, immediateRisk, summary }.', exports:['handler'], imports:['@anthropic-ai/sdk'] },
+  { id:'components/FleetMap.jsx', type:'component', x:300, y:80, desc:'Leaflet MapContainer. MUST be dynamic import (no SSR). DrawToolbar only for command role.', exports:['FleetMap'], imports:['ShipMarker','ZoneLayer'] },
+  { id:'components/ShipMarker.jsx', type:'component', x:150, y:0, desc:'Ship marker. 900ms RAF lerp. Calls marker.setLatLng() directly — not React re-render.', exports:['ShipMarker'], imports:[] },
+  { id:'components/ZoneLayer.jsx', type:'component', x:440, y:0, desc:'Renders restricted zone polygons. Red fill 15% opacity.', exports:['ZoneLayer'], imports:[] },
+  { id:'components/AlertPanel.jsx', type:'component', x:200, y:600, desc:'Unacked alerts sorted by severity desc. Geofence + proximity. Ack button.', exports:['AlertPanel'], imports:[] },
+  { id:'components/DirectiveModal.jsx', type:'component', x:400, y:600, desc:'Modal: hold / reroute (port dropdown) / divert (lat+lng inputs).', exports:['DirectiveModal'], imports:[] },
+  { id:'data/fleet.json', type:'data', x:700, y:550, desc:'15 ships in Strait of Hormuz. Loaded once at startTick(). Speed 8-18 knots. 6 destination ports.', exports:[], imports:[] },
+];
+const EDGES = [
+  ['server.js','lib/simulator.js'],['server.js','lib/geofence.js'],['server.js','lib/router.js'],['server.js','lib/playback.js'],
+  ['lib/simulator.js','lib/geofence.js'],['lib/simulator.js','lib/router.js'],['lib/simulator.js','lib/weather.js'],['lib/simulator.js','lib/playback.js'],['lib/simulator.js','data/fleet.json'],
+  ['pages/command.js','hooks/useFleetSocket.js'],['pages/captain.js','hooks/useFleetSocket.js'],
+  ['pages/captain.js','pages/api/distress.js'],
+  ['pages/command.js','components/FleetMap.jsx'],['pages/command.js','components/AlertPanel.jsx'],['pages/command.js','components/DirectiveModal.jsx'],
+  ['components/FleetMap.jsx','components/ShipMarker.jsx'],['components/FleetMap.jsx','components/ZoneLayer.jsx'],
+  ['hooks/useFleetSocket.js','server.js'],
+];
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W, H, scale=1, ox=0, oy=0, drag=false, dragStart={}, nodeMap={};
+NODES.forEach(n=>nodeMap[n.id]=n);
+
+function resize(){ W=canvas.width=innerWidth; H=canvas.height=innerHeight; }
+resize(); window.onresize=()=>{ resize(); draw(); };
+
+// Center graph
+const gMinX=Math.min(...NODES.map(n=>n.x)), gMaxX=Math.max(...NODES.map(n=>n.x));
+const gMinY=Math.min(...NODES.map(n=>n.y)), gMaxY=Math.max(...NODES.map(n=>n.y));
+ox = W/2 - (gMinX+gMaxX)/2;
+oy = H/2 - (gMinY+gMaxY)/2 + 30;
+
+function wx(x){ return x*scale+ox; }
+function wy(y){ return y*scale+oy; }
+function R(n){ return n.type==='entrypoint'?22:n.type==='hook'?18:16; }
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  // Draw edges
+  EDGES.forEach(([a,b])=>{
+    const na=nodeMap[a], nb=nodeMap[b]; if(!na||!nb) return;
+    ctx.beginPath();
+    ctx.moveTo(wx(na.x),wy(na.y));
+    ctx.lineTo(wx(nb.x),wy(nb.y));
+    ctx.strokeStyle='rgba(100,116,139,0.35)';
+    ctx.lineWidth=1.5;
+    ctx.stroke();
+    // Arrow
+    const ang=Math.atan2(wy(nb.y)-wy(na.y), wx(nb.x)-wx(na.x));
+    const r=R(nb)*scale;
+    const ax=wx(nb.x)-Math.cos(ang)*r, ay=wy(nb.y)-Math.sin(ang)*r;
+    ctx.beginPath();
+    ctx.moveTo(ax,ay);
+    ctx.lineTo(ax-10*Math.cos(ang-0.4),ay-10*Math.sin(ang-0.4));
+    ctx.lineTo(ax-10*Math.cos(ang+0.4),ay-10*Math.sin(ang+0.4));
+    ctx.closePath();
+    ctx.fillStyle='rgba(100,116,139,0.5)';
+    ctx.fill();
+  });
+  // Draw nodes
+  NODES.forEach(n=>{
+    const x=wx(n.x), y=wy(n.y), r=R(n)*scale;
+    ctx.beginPath();
+    ctx.arc(x,y,r,0,Math.PI*2);
+    ctx.fillStyle=COLORS[n.type]+'33';
+    ctx.fill();
+    ctx.strokeStyle=COLORS[n.type];
+    ctx.lineWidth=2;
+    ctx.stroke();
+    // Label
+    const short=n.id.split('/').pop();
+    ctx.fillStyle='#e2e8f0';
+    ctx.font=`${Math.max(9,11*scale)}px Inter,sans-serif`;
+    ctx.textAlign='center';
+    ctx.fillText(short, x, y+r+14*scale);
+  });
+}
+
+// Hover/click
+let hovered=null;
+canvas.addEventListener('mousemove',e=>{
+  const mx=e.clientX, my=e.clientY;
+  hovered=null;
+  NODES.forEach(n=>{ const dx=wx(n.x)-mx, dy=wy(n.y)-my; if(Math.sqrt(dx*dx+dy*dy)<R(n)*scale+4) hovered=n; });
+  canvas.style.cursor=hovered?'pointer':'default';
+});
+canvas.addEventListener('click',e=>{
+  if(!hovered) return;
+  const d=document.getElementById('detail');
+  document.getElementById('d-title').textContent=hovered.id;
+  document.getElementById('d-desc').textContent=hovered.desc;
+  document.getElementById('d-exports').innerHTML= hovered.exports.length ? '<div style="color:#94a3b8;font-size:0.75rem;margin-bottom:4px">Exports:</div>'+hovered.exports.map(x=>`<span class="tag">${x}</span>`).join('') : '';
+  document.getElementById('d-imports').innerHTML= hovered.imports.length ? '<div style="color:#94a3b8;font-size:0.75rem;margin-bottom:4px">Imports:</div>'+hovered.imports.map(x=>`<span class="tag">${x}</span>`).join('') : '';
+  d.style.display='block';
+});
+
+// Pan
+canvas.addEventListener('mousedown',e=>{ drag=true; dragStart={x:e.clientX-ox,y:e.clientY-oy}; });
+canvas.addEventListener('mouseup',()=>drag=false);
+canvas.addEventListener('mousemove',e=>{ if(drag){ ox=e.clientX-dragStart.x; oy=e.clientY-dragStart.y; draw(); }});
+
+// Zoom
+canvas.addEventListener('wheel',e=>{ e.preventDefault(); const f=e.deltaY>0?0.9:1.1; scale*=f; draw(); },{passive:false});
+
+draw();
+</script>
+</body>
+</html>
