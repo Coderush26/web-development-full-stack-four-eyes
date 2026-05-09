@@ -266,6 +266,7 @@ function applyTick(state) {
   ensureStateShape(state);
   const zones = state.zones || [];
   const activePairs = new Set();
+  const activeGeofenceKeys = new Set();
 
   for (const ship of state.ships) {
     const directive = state.directives?.[ship.id];
@@ -311,6 +312,7 @@ function applyTick(state) {
       );
       if (inside) {
         const key = `GEOFENCE:${ship.id}:${zone.id}`;
+        activeGeofenceKeys.add(key);
         const already = state.alerts.some((a) => a.status !== 'resolved' && a.dedupeKey === key);
         if (!already) {
           addAlert(state, {
@@ -330,6 +332,21 @@ function applyTick(state) {
       }
     }
   }
+
+  state.alerts = state.alerts.map((alert) => {
+    if (alert.type !== 'geofence' || alert.status === 'resolved') {
+      return alert;
+    }
+    if (!activeGeofenceKeys.has(alert.dedupeKey)) {
+      return {
+        ...alert,
+        status: 'resolved',
+        resolvedAt: Date.now(),
+        resolvedBy: 'system'
+      };
+    }
+    return alert;
+  });
 
   for (let i = 0; i < state.ships.length; i += 1) {
     for (let j = i + 1; j < state.ships.length; j += 1) {
@@ -387,6 +404,7 @@ export function useFleetSocket(shipId) {
   const previousSeverityRef = useRef('NORMAL');
   const socketRef = useRef(null);
   const prevAlertCountRef = useRef(0);
+  const activeAlertIdsRef = useRef(new Set());
   const isCommand = !shipId;
   const normalizeShips = (nextShips) => (Array.isArray(nextShips)
     ? nextShips.map((ship) => ({
@@ -426,12 +444,16 @@ export function useFleetSocket(shipId) {
       setDirectiveResponses(Array.isArray(value.directiveResponses) ? value.directiveResponses : []);
       setBackendHealthy(true);
 
-      const nextCount = Array.isArray(value.alerts) ? value.alerts.length : 0;
-      if (nextCount > prevAlertCountRef.current) {
+      const allAlerts = Array.isArray(value.alerts) ? value.alerts : [];
+      const activeAlerts = allAlerts.filter((a) => a?.status === 'active');
+      const currentActiveIds = new Set(activeAlerts.map((a) => a.id));
+      const hasNewActiveAlert = activeAlerts.some((a) => !activeAlertIdsRef.current.has(a.id));
+      if (hasNewActiveAlert) {
         const beep = new Audio(ALERT_BEEP_URL);
         beep.play().catch(() => {});
       }
-      prevAlertCountRef.current = nextCount;
+      activeAlertIdsRef.current = currentActiveIds;
+      prevAlertCountRef.current = allAlerts.length;
     });
 
     return () => {
@@ -453,7 +475,9 @@ export function useFleetSocket(shipId) {
   }, [isCommand]);
 
   useEffect(() => {
-    const highestAlertSeverity = alerts.reduce((highest, alert) => {
+    const highestAlertSeverity = alerts
+      .filter((alert) => alert?.status === 'active')
+      .reduce((highest, alert) => {
       const s = typeof alert.severity === 'number' ? alert.severity : alert.severity === 'high' ? 4 : 1;
       return Math.max(highest, s);
     }, 0);
