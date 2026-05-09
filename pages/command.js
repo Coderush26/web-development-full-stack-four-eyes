@@ -105,7 +105,10 @@ export default function CommandPage() {
   const sortedShips = useMemo(
     () => [...ships]
       .map((ship) => {
-        const shipAlerts = alerts.filter((alert) => alert.shipId === ship.id || alert.ship1Id === ship.id || alert.ship2Id === ship.id);
+        const shipAlerts = alerts.filter((alert) => (
+          alert.status === 'active'
+          && (alert.shipId === ship.id || alert.ship1Id === ship.id || alert.ship2Id === ship.id)
+        ));
         const topAlertScore = shipAlerts.length ? Math.max(...shipAlerts.map(scoreFromAlert)) : 1;
         const severe = severityLabelFromScore(topAlertScore);
         const type = ship.cargo?.toLowerCase().includes('oil') ? 'tanker'
