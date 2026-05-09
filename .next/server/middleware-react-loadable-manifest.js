@@ -1,1 +1,1 @@
-self.__REACT_LOADABLE_MANIFEST='{"pages\\\\command.js -> ../components/FleetMap":{"id":720,"files":["static/chunks/0b7b90cd.abad55a865e4a8c0.js","static/chunks/949.d4e2e9d9ccba817b.js","static/chunks/720.ceca9d05831cbf1d.js"]}}';
+self.__REACT_LOADABLE_MANIFEST="{\"pages\\\\command.js -> ../components/FleetMap\":{\"id\":\"pages\\\\command.js -> ../components/FleetMap\",\"files\":[\"static/chunks/components_FleetMap_jsx.js\"]}}"
