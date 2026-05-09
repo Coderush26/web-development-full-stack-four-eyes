@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { audioManager } from '../src/services/audio/audioManager';
+import audioManager from '../src/services/audio/audioManager';
 import * as turf from '@turf/turf';
 import {
   get,
