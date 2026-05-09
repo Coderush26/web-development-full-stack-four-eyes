@@ -1,6 +1,1 @@
-{
-  "/_app": "pages/_app.js",
-  "/_error": "pages/_error.js",
-  "/_document": "pages/_document.js",
-  "/command": "pages/command.js"
-}
+{"/_app":"pages/_app.js","/api/distress":"pages/api/distress.js","/_error":"pages/_error.js","/captain":"pages/captain.html","/":"pages/index.html","/command":"pages/command.html","/_document":"pages/_document.js","/404":"pages/404.html"}
