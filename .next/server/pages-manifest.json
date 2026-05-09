@@ -2,5 +2,7 @@
   "/_app": "pages/_app.js",
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
-  "/command": "pages/command.js"
+  "/command": "pages/command.js",
+  "/captain": "pages/captain.js",
+  "/api/distress": "pages/api/distress.js"
 }

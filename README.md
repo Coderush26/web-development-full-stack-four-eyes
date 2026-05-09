@@ -7,6 +7,7 @@ VesselSync is a real-time fleet command dashboard for maritime vessel monitoring
 Required:
 
 - `OPENROUTER_API_KEY` (from openrouter.ai)
+- (Compatibility) `ANTHROPIC_API_KEY` is also accepted by `/api/distress` as a fallback key name.
 
 Create `.env.local`:
 

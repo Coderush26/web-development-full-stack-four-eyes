@@ -22,6 +22,11 @@
       "static/chunks/main.js",
       "static/chunks/pages/_error.js"
     ],
+    "/captain": [
+      "static/chunks/webpack.js",
+      "static/chunks/main.js",
+      "static/chunks/pages/captain.js"
+    ],
     "/command": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",

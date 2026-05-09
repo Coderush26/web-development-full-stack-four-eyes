@@ -8,13 +8,12 @@ export default function CaptainPage() {
   const { ships, directives, respondDirective, connected } = useFleetSocket(shipId || undefined);
   const [distressText, setDistressText] = useState('');
   const [distressResult, setDistressResult] = useState(null);
+  const ownShip = useMemo(() => ships.find((ship) => ship.id === shipId), [ships, shipId]);
+  const latestDirective = shipId ? directives[shipId] : undefined;
 
   if (!shipId) {
     return <div className="error-page">No ship ID provided</div>;
   }
-
-  const ownShip = useMemo(() => ships.find((ship) => ship.id === shipId), [ships, shipId]);
-  const latestDirective = directives[shipId];
 
   async function escalate() {
     respondDirective(shipId, 'ESCALATE', distressText);
