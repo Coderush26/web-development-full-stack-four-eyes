@@ -1,3 +1,5 @@
+import { formatOperationalTime } from '../lib/timeFormat';
+
 function severityScore(alert) {
   if (alert.severity === 'high') return 5;
   if (typeof alert.severity === 'number') return alert.severity;
@@ -27,7 +29,7 @@ export default function AlertPanel({ alerts, onAck }) {
               ? `${alert.shipId} entered ${alert.zoneName}`
               : `${alert.ship1Id} ↔ ${alert.ship2Id}`)}
           </div>
-          <small>{new Date(alert.timestamp || Date.now()).toLocaleTimeString()}</small>
+          <small suppressHydrationWarning>{formatOperationalTime(alert.timestamp || Date.now())}</small>
           <div style={{ marginTop: 6 }}>
             <button className="btn-danger" type="button" onClick={() => onAck(alert.id)} style={{ fontSize: '0.68rem', padding: '4px 10px' }}>
               Acknowledge

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet-draw';
 import { Circle, FeatureGroup, MapContainer, Marker, Polyline, TileLayer, Tooltip, useMap } from 'react-leaflet';
@@ -59,13 +59,49 @@ function DrawToolbar({ onAddZone }) {
 
 function TacticalFocus({ tacticalInspection }) {
   const map = useMap();
+  const lastSignatureRef = useRef('');
 
   useEffect(() => {
     if (!tacticalInspection?.enabled || !tacticalInspection?.routeModel?.route?.fullPath?.length) return;
     const path = tacticalInspection.routeModel.route.fullPath;
+    const signature = `${path.length}:${path[0]?.lat?.toFixed(3)}:${path[0]?.lng?.toFixed(3)}:${path[path.length - 1]?.lat?.toFixed(3)}:${path[path.length - 1]?.lng?.toFixed(3)}`;
+    if (lastSignatureRef.current === signature) return;
+    lastSignatureRef.current = signature;
     const latLngBounds = L.latLngBounds(path.map((point) => [point.lat, point.lng]));
     map.fitBounds(latLngBounds.pad(0.22), { animate: true, duration: 0.9 });
   }, [map, tacticalInspection]);
+
+  return null;
+}
+
+function CaptainAutoFocus({ role, ships, tacticalInspection, emergencyBroadcast }) {
+  const map = useMap();
+  const lastCenterRef = useRef(null);
+
+  useEffect(() => {
+    if (role !== 'captain' || ships.length === 0) return;
+    const ship = ships[0];
+    if (!ship) return;
+
+    if (emergencyBroadcast?.shipId && emergencyBroadcast.shipId === ship.id) {
+      map.flyTo([ship.lat, ship.lng], Math.max(map.getZoom(), 10), { animate: true, duration: 0.7 });
+      return;
+    }
+
+    const route = tacticalInspection?.routeModel?.route?.remaining || [];
+    if (route.length > 1) {
+      const bounds = L.latLngBounds(route.slice(0, 12).map((point) => [point.lat, point.lng]));
+      map.fitBounds(bounds.pad(0.18), { animate: true, duration: 0.65, maxZoom: 10 });
+      return;
+    }
+
+    const center = [ship.lat, ship.lng];
+    const prev = lastCenterRef.current;
+    if (!prev || Math.abs(prev[0] - center[0]) > 0.02 || Math.abs(prev[1] - center[1]) > 0.02) {
+      lastCenterRef.current = center;
+      map.flyTo(center, 9, { animate: true, duration: 0.6 });
+    }
+  }, [role, ships, tacticalInspection, emergencyBroadcast, map]);
 
   return null;
 }
@@ -252,6 +288,12 @@ export default function FleetMap({ ships, zones, role, onAddZone, onIssueDirecti
         pathOptions={{ color: '#22d3ee', fillOpacity: 0, opacity: 0.07, weight: 1, dashArray: '5 8' }}
       />
       {tacticalInspection?.enabled ? <TacticalFocus tacticalInspection={tacticalInspection} /> : null}
+      <CaptainAutoFocus
+        role={role}
+        ships={ships}
+        tacticalInspection={tacticalInspection}
+        emergencyBroadcast={emergencyBroadcast}
+      />
       {role === 'command' ? <DrawToolbar onAddZone={onAddZone} /> : null}
     </MapContainer>
   );

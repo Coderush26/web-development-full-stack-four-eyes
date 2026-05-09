@@ -16,6 +16,8 @@ export function useFleetSocket(shipId) {
   const [emergencyBroadcast, setEmergencyBroadcast] = useState(null);
   const [prisTrackedShips, setPrisTrackedShips] = useState({});
   const [prisSystemMetrics, setPrisSystemMetrics] = useState(null);
+  const [audioSeverity, setAudioSeverity] = useState('NORMAL');
+  const previousSeverityRef = useRef('NORMAL');
   const socketRef = useRef(null);
   const normalizeShips = (nextShips) => (Array.isArray(nextShips)
     ? nextShips.map((ship) => ({
@@ -119,17 +121,32 @@ export function useFleetSocket(shipId) {
       return highest;
     }, 0);
 
+    const highestFuelSeverity = ships.reduce((highest, ship) => {
+      const fuelPct = ship?.fuelCapacity ? (ship.fuel / ship.fuelCapacity) * 100 : 100;
+      if (fuelPct <= 12) return Math.max(highest, 4);
+      if (fuelPct <= 28) return Math.max(highest, 2);
+      return highest;
+    }, 0);
+
     const emergencyActive = emergencyBroadcast && (Date.now() - emergencyBroadcast.timestamp) < 20_000;
     if (emergencyActive) {
+      setAudioSeverity('EMERGENCY');
       audioManager.setSeverity('EMERGENCY');
       return;
     }
 
-    const merged = Math.max(highestAlertSeverity, highestRouteThreat);
-    if (merged >= 4) audioManager.setSeverity('CRITICAL');
-    else if (merged >= 2) audioManager.setSeverity('WARNING');
-    else audioManager.setSeverity('NORMAL');
-  }, [alerts, routeIntelligenceByShip, emergencyBroadcast]);
+    const merged = Math.max(highestAlertSeverity, highestRouteThreat, highestFuelSeverity);
+    let nextSeverity = 'NORMAL';
+    if (merged >= 4) nextSeverity = 'CRITICAL';
+    else if (merged >= 2) nextSeverity = 'WARNING';
+
+    if (previousSeverityRef.current !== nextSeverity && (nextSeverity === 'CRITICAL' || nextSeverity === 'WARNING')) {
+      audioManager.triggerAiEscalationCue();
+    }
+    previousSeverityRef.current = nextSeverity;
+    setAudioSeverity(nextSeverity);
+    audioManager.setSeverity(nextSeverity);
+  }, [alerts, routeIntelligenceByShip, emergencyBroadcast, ships]);
 
   const sendDirective = useCallback((targetShipId, action, params) => {
     socketRef.current?.emit('directive:send', { shipId: targetShipId, action, params });
@@ -183,6 +200,10 @@ export function useFleetSocket(shipId) {
     socketRef.current?.emit('pris:ship:force_recompute', { shipId: targetShipId });
   }, []);
 
+  const sendCaptainDistressSignal = useCallback((targetShipId, message) => {
+    socketRef.current?.emit('captain:distress_signal', { shipId: targetShipId, message });
+  }, []);
+
   return {
     ships,
     alerts,
@@ -194,6 +215,7 @@ export function useFleetSocket(shipId) {
     emergencyBroadcast,
     prisTrackedShips,
     prisSystemMetrics,
+    audioSeverity,
     connected,
     backendHealthy,
     sendDirective,
@@ -209,6 +231,7 @@ export function useFleetSocket(shipId) {
     resumePrisShip,
     deepScanPrisShip,
     forceRecomputePrisShip,
+    sendCaptainDistressSignal,
     socketUrl: SOCKET_URL
   };
 }

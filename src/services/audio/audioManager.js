@@ -2,14 +2,16 @@ const SOUND_FILES = {
   ping: '/audio/ping.mp3',
   warning: '/audio/warning.mp3',
   critical: '/audio/critical.mp3',
-  emergency: '/audio/emergency.mp3'
+  emergency: '/audio/emergency.mp3',
+  aiAlert: '/audio/ai-alert.mp3'
 };
 
 const FALLBACK_SOUND_FILES = {
   ping: '/sounds/beep.mp3',
   warning: '/sounds/beep.mp3',
   critical: '/sounds/alert.mp3',
-  emergency: '/sounds/emergency.mp3'
+  emergency: '/sounds/emergency.mp3',
+  aiAlert: '/sounds/alert.mp3'
 };
 
 const LEVEL_RANK = {
@@ -30,6 +32,7 @@ class AudioManager {
     this.cadenceTimer = null;
     this.emergencyAudio = null;
     this.emergencyRetryTimer = null;
+    this.lastAiCueAt = 0;
   }
 
   normalize(level) {
@@ -135,6 +138,14 @@ class AudioManager {
 
     this.startCadence(next);
     return this.currentLevel;
+  }
+
+  triggerAiEscalationCue() {
+    if (this.currentLevel === 'EMERGENCY') return;
+    const now = Date.now();
+    if (now - this.lastAiCueAt < 7000) return;
+    this.lastAiCueAt = now;
+    this.playAsset(SOUND_FILES.aiAlert, FALLBACK_SOUND_FILES.aiAlert, false);
   }
 
   stopAll() {

@@ -1,8 +1,10 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/router';
 import AlertPanel from '../components/AlertPanel';
 import DirectiveModal from '../components/DirectiveModal';
 import { useFleetSocket } from '../hooks/useFleetSocket';
+import { formatOperationalTime } from '../lib/timeFormat';
 
 const FleetMap = dynamic(() => import('../components/FleetMap'), { ssr: false });
 
@@ -29,6 +31,7 @@ function scoreFromAlert(alert) {
 }
 
 export default function CommandPage() {
+  const router = useRouter();
   const {
     ships,
     alerts,
@@ -44,6 +47,7 @@ export default function CommandPage() {
     applyAiReroute,
     prisTrackedShips,
     prisSystemMetrics,
+    audioSeverity,
     pausePrisShip,
     resumePrisShip,
     deepScanPrisShip,
@@ -63,6 +67,14 @@ export default function CommandPage() {
   const [draggingPanel, setDraggingPanel] = useState(null);
 
   useEffect(() => { console.log('[PHASE 9 COMPLETE]'); }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const role = window.localStorage.getItem('vesselsync_role');
+    if (role !== 'command') {
+      router.replace('/');
+    }
+  }, [router]);
 
   useEffect(() => {
     const load = async () => {
@@ -326,6 +338,9 @@ export default function CommandPage() {
             <span className={`status-dot ${connected ? 'online' : 'offline'}`} />
             {connected ? 'System Online' : 'Disconnected'} • {ships.length} vessels
           </div>
+          <div className={`audio-state-badge ${String(audioSeverity || 'NORMAL').toLowerCase()}`}>
+            Audio State: {audioSeverity || 'NORMAL'}
+          </div>
         </div>
 
         <div className="sidebar-ships">
@@ -402,7 +417,7 @@ export default function CommandPage() {
             </div>
             <div className="incident-focus-meta">
               <span>Severity: {activeIncident.severityLevel.toUpperCase()}</span>
-              <span>{new Date(activeIncident.createdAt || Date.now()).toLocaleTimeString()}</span>
+              <span suppressHydrationWarning>{formatOperationalTime(activeIncident.createdAt || Date.now())}</span>
             </div>
             <p>{activeIncident.message || 'An anomaly requires immediate command action.'}</p>
             <div className="incident-focus-actions">
@@ -454,7 +469,7 @@ export default function CommandPage() {
                   <span>--</span>
                 </div>
                 <p>Select a vessel to start PRIS route intelligence analysis.</p>
-                <small>{new Date().toLocaleTimeString()}</small>
+                <small suppressHydrationWarning>{formatOperationalTime(Date.now())}</small>
               </article>
             ) : (
               aiFeed.map((item) => (
@@ -464,7 +479,7 @@ export default function CommandPage() {
                     <span>{item.confidence}%</span>
                   </div>
                   <p>{item.recommendation}</p>
-                  <small>{new Date(item.timestamp).toLocaleTimeString()}</small>
+                  <small suppressHydrationWarning>{formatOperationalTime(item.timestamp)}</small>
                 </article>
               ))
             )}
@@ -500,7 +515,7 @@ export default function CommandPage() {
                   <div className="pris-ship-meta">
                     <span>{row.mode}</span>
                     <span>{row.routeStatus}</span>
-                    <span>{row.lastUpdate ? new Date(row.lastUpdate).toLocaleTimeString() : 'No update'}</span>
+                    <span suppressHydrationWarning>{row.lastUpdate ? formatOperationalTime(row.lastUpdate) : 'No update'}</span>
                   </div>
                   <div className="pris-ship-actions">
                     {row.active ? (
@@ -604,7 +619,7 @@ export default function CommandPage() {
               <span className="playback-label">
                 ⏱ {playbackIndex === -1
                   ? <strong>LIVE</strong>
-                  : <strong>{new Date(snapshots[playbackIndex]?.timestamp).toLocaleTimeString()}</strong>}
+                  : <strong suppressHydrationWarning>{formatOperationalTime(snapshots[playbackIndex]?.timestamp)}</strong>}
               </span>
               <button className="btn-secondary" onClick={() => {
                 setPlaybackIndex(Math.max(0, snapshots.length - 8));
@@ -640,7 +655,8 @@ export default function CommandPage() {
                 <span
                   key={snapshot.timestamp}
                   className={`playback-marker ${idx % 5 === 0 ? 'alert' : ''}`}
-                  title={new Date(snapshot.timestamp).toLocaleTimeString()}
+                  title={formatOperationalTime(snapshot.timestamp)}
+                  suppressHydrationWarning
                 />
               ))}
             </div>

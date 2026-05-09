@@ -440,6 +440,33 @@ io.on('connection', (socket) => {
     emitRouteIntelligence(shipId, alternativePoints);
   });
 
+  socket.on('captain:distress_signal', (payload) => {
+    const shipId = payload?.shipId;
+    const message = String(payload?.message || 'Captain distress signal triggered').trim();
+    if (!shipId) return;
+    const ship = simulator.getShip(shipId);
+    if (ship) {
+      ship.status = 'distress';
+    }
+    addAlert({
+      type: 'distress',
+      shipId,
+      severity: 5,
+      incidentType: 'unknown',
+      immediateRisk: true,
+      message
+    });
+    emergencyEventsToday += 1;
+    io.emit('emergency:intelligence:broadcast', {
+      shipId,
+      timestamp: Date.now(),
+      severity: 'HIGH',
+      riskScore: 96,
+      message
+    });
+    emitPrisMetrics();
+  });
+
   socket.on('pris:ship:pause', (payload) => {
     const shipId = payload?.shipId;
     if (!shipId) return;
