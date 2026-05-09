@@ -30,6 +30,11 @@ function scoreFromAlert(alert) {
   return 1;
 }
 
+function formatLocalTime(timestamp) {
+  if (!timestamp) return '--';
+  return new Date(timestamp).toLocaleTimeString();
+}
+
 export default function CommandPage() {
   const router = useRouter();
   const {
@@ -65,16 +70,25 @@ export default function CommandPage() {
     pris: { x: 0, y: 0 }
   });
   const [draggingPanel, setDraggingPanel] = useState(null);
+  const [clientClock, setClientClock] = useState('--');
 
   useEffect(() => { console.log('[PHASE 9 COMPLETE]'); }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const role = window.localStorage.getItem('vesselsync_role');
-    if (role !== 'command') {
-      router.replace('/');
+    if (typeof window !== 'undefined') {
+      const role = window.localStorage.getItem('vesselsync_role');
+      if (role !== 'command') {
+        router.replace('/');
+      }
     }
   }, [router]);
+
+  useEffect(() => {
+    const updateClock = () => setClientClock(new Date().toLocaleTimeString());
+    updateClock();
+    const id = setInterval(updateClock, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -417,7 +431,7 @@ export default function CommandPage() {
             </div>
             <div className="incident-focus-meta">
               <span>Severity: {activeIncident.severityLevel.toUpperCase()}</span>
-              <span suppressHydrationWarning>{formatOperationalTime(activeIncident.createdAt || Date.now())}</span>
+              <span suppressHydrationWarning>{activeIncident.createdAt ? formatOperationalTime(activeIncident.createdAt) : '--'}</span>
             </div>
             <p>{activeIncident.message || 'An anomaly requires immediate command action.'}</p>
             <div className="incident-focus-actions">
@@ -469,7 +483,7 @@ export default function CommandPage() {
                   <span>--</span>
                 </div>
                 <p>Select a vessel to start PRIS route intelligence analysis.</p>
-                <small suppressHydrationWarning>{formatOperationalTime(Date.now())}</small>
+                <small>{clientClock}</small>
               </article>
             ) : (
               aiFeed.map((item) => (

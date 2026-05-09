@@ -1225,7 +1225,9 @@ select option:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   padding: 16px;
+  padding-bottom: 28px;
   flex: 1;
+  align-content: start;
 }
 
 .captain-cockpit {

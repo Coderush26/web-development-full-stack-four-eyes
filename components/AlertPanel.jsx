@@ -29,7 +29,7 @@ export default function AlertPanel({ alerts, onAck }) {
               ? `${alert.shipId} entered ${alert.zoneName}`
               : `${alert.ship1Id} ↔ ${alert.ship2Id}`)}
           </div>
-          <small suppressHydrationWarning>{formatOperationalTime(alert.timestamp || Date.now())}</small>
+          <small suppressHydrationWarning>{alert.timestamp ? formatOperationalTime(alert.timestamp) : '--'}</small>
           <div style={{ marginTop: 6 }}>
             <button className="btn-danger" type="button" onClick={() => onAck(alert.id)} style={{ fontSize: '0.68rem', padding: '4px 10px' }}>
               Acknowledge
