@@ -1,1 +1,32 @@
-[![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/qMg4I596)
+# VesselSync
+
+VesselSync is a real-time fleet command dashboard for maritime vessel monitoring, geofencing, routing directives, proximity alerts, weather-aware simulation, and captain escalation workflows.
+
+## Environment variables
+
+Required:
+
+- `ANTHROPIC_API_KEY` (from console.anthropic.com)
+
+Create `.env.local`:
+
+```bash
+ANTHROPIC_API_KEY=your_key_here
+```
+
+## Run locally
+
+```bash
+npm install
+npm run dev
+```
+
+- Frontend (Next.js): `http://localhost:3000`
+- Socket/API server: `http://localhost:3001`
+- Playback endpoint: `http://localhost:3001/api/playback`
+
+## Docker
+
+```bash
+docker compose up --build
+```

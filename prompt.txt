@@ -1,0 +1,575 @@
+# FLEET COMMAND — CURSOR AGENT PROMPT
+# Hackathon: Code Rush Web Dev Track
+# Time: 4 hours | Stack: Next.js 14, Socket.IO, Leaflet, Turf.js, Anthropic SDK
+
+---
+
+## WHO YOU ARE
+You are a senior full-stack engineer building a real-time maritime fleet command
+system for a hackathon. You write clean, working code. You do NOT hallucinate
+library APIs. If you are unsure of an exact API signature, you write a comment
+saying "// CHECK DOCS" and use the most conservative safe version.
+
+---
+
+## HARD RULES — NEVER VIOLATE THESE
+
+1. DO NOT use Firebase Realtime Database or Firestore for ship state. Ship
+   state lives in Node.js memory only. Firebase is banned from the hot path.
+
+2. DO NOT use polling (setInterval fetch). All real-time sync is via Socket.IO
+   persistent connections only.
+
+3. DO NOT invent library APIs. Use only documented methods from:
+   - socket.io@4 (server + client)
+   - react-leaflet@4 + leaflet@1.9
+   - leaflet-draw@1.0
+   - @turf/turf@6
+   - openai (NOT used) — use @anthropic-ai/sdk@latest
+   - next@14
+
+4. DO NOT use Next.js App Router for the socket server. The socket server runs
+   in a CUSTOM Express + Socket.IO server (server.js at project root).
+   Next.js handles only the frontend pages.
+
+5. DO NOT start building a feature until its dependencies are done and tested.
+   Follow the PHASE ORDER exactly.
+
+6. After finishing each phase, write a one-line console.log checkpoint:
+   console.log('[PHASE X COMPLETE]') so we can verify progress.
+
+---
+
+## PROJECT STRUCTURE
+
+fleet-command/
+├── server.js              ← Express + Socket.IO custom server (NOT Next.js API)
+├── lib/
+│   ├── simulator.js       ← Ship state + tick loop
+│   ├── router.js          ← Path routing logic
+│   ├── weather.js         ← Open-Meteo fetch
+│   ├── geofence.js        ← Turf.js zone + proximity checks
+│   └── playback.js        ← Ring buffer for history
+├── data/
+│   └── fleet.json         ← 15 ships starting config (you generate this)
+├── pages/
+│   ├── index.js           ← Redirect to /command
+│   ├── command.js         ← Command interface
+│   └── captain.js         ← Captain interface (?ship=ID query param)
+├── components/
+│   ├── FleetMap.jsx        ← Leaflet map wrapper (dynamic import, no SSR)
+│   ├── ShipMarker.jsx      ← Individual ship marker + popup
+│   ├── ZoneLayer.jsx       ← Restricted zone polygons
+│   ├── AlertPanel.jsx      ← Alert list with ack button
+│   └── DirectiveModal.jsx  ← Captain accept/escalate UI
+├── hooks/
+│   └── useFleetSocket.js   ← Socket.IO client hook
+├── Dockerfile
+├── docker-compose.yml
+└── .env.local
+
+---
+
+## fleet.json FORMAT
+
+Generate this file yourself. It must contain exactly 15 ships in the Strait of
+Hormuz / Persian Gulf region. Use realistic lat/lng within these bounds:
+  lat: 22.0 to 27.5
+  lng: 54.0 to 60.5
+
+Each ship object:
+{
+  "id": "SHIP-01",
+  "name": "MV Hormuz Titan",
+  "lat": 26.1,
+  "lng": 56.3,
+  "heading": 210,        // degrees, 0=north, 90=east
+  "speed": 12,           // knots — convert to km/h: * 1.852
+  "fuel": 8500,          // arbitrary units
+  "fuelCapacity": 10000,
+  "cargo": "Crude Oil — 280,000 barrels",
+  "destination": { "name": "Port of Fujairah", "lat": 25.11, "lng": 56.34 },
+  "status": "normal",    // normal | rerouting | distressed | stopped | stranded
+  "inWeather": false,
+  "path": [],            // computed waypoints array [{lat, lng}]
+  "alerts": []
+}
+
+Vary speeds between 8–18 knots. Use 6 different destination ports spread around
+the gulf. Space ships out realistically — no two ships within 10km of each other
+at start.
+
+---
+
+## NAVIGABLE WATER POLYGON
+
+Since we have no real coastline data, define a simplified convex polygon in
+lib/geofence.js representing navigable water. Use this approximate polygon
+(Strait of Hormuz + surrounding open water):
+
+const NAVIGABLE_WATER = {
+  type: 'Polygon',
+  coordinates: [[
+    [54.0, 22.5], [60.5, 22.5], [60.5, 27.0],
+    [57.5, 27.5], [54.5, 26.5], [54.0, 24.0], [54.0, 22.5]
+  ]]
+}
+
+All routing must keep ships inside this polygon.
+
+---
+
+## PHASE 1 — CUSTOM SERVER + SOCKET FOUNDATION
+Files: server.js, lib/simulator.js
+
+### server.js
+- Express app on port 3001
+- Attach Socket.IO to the Express server
+- On 'connection': log the socket id, send current fleet state immediately
+  via socket.emit('fleet:state', getAllShips())
+- Import and start the simulator tick after server is ready
+- Proxy Next.js on port 3000 (run Next.js separately in dev)
+
+### lib/simulator.js
+- Load fleet.json on startup
+- Export: getAllShips(), getShip(id), updateShip(id, patch)
+- startTick(): setInterval at 1000ms
+  On each tick:
+    1. For each ship:
+       a. If ship.path has waypoints, advance toward next waypoint
+          - Compute heading to next waypoint using bearing formula
+          - speedKmH = ship.speed * 1.852
+          - distanceThisTick = speedKmH / 3600  (km per second)
+          - Move ship lat/lng that distance toward waypoint
+          - If within 0.05km of waypoint, shift to next waypoint
+          - If path is empty, ship has arrived → status = 'stopped'
+       b. Fuel burn: ship.fuel -= (inWeather ? 0.03 * 1.3 : 0.03)
+       c. If fuel <= 0: status = 'stopped', fuel = 0
+    2. Emit 'fleet:update' to ALL connected sockets with full ships array
+
+### Bearing formula (include this exactly in simulator.js):
+function bearing(lat1, lng1, lat2, lng2) {
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const lat1R = lat1 * Math.PI / 180
+  const lat2R = lat2 * Math.PI / 180
+  const y = Math.sin(dLng) * Math.cos(lat2R)
+  const x = Math.cos(lat1R)*Math.sin(lat2R) -
+            Math.sin(lat1R)*Math.cos(lat2R)*Math.cos(dLng)
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
+}
+
+### Coordinate advance formula:
+function moveAlongBearing(lat, lng, bearingDeg, distKm) {
+  const R = 6371
+  const d = distKm / R
+  const b = bearingDeg * Math.PI / 180
+  const lat1 = lat * Math.PI / 180
+  const lng1 = lng * Math.PI / 180
+  const lat2 = Math.asin(Math.sin(lat1)*Math.cos(d) +
+                Math.cos(lat1)*Math.sin(d)*Math.cos(b))
+  const lng2 = lng1 + Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(lat1),
+                Math.cos(d)-Math.sin(lat1)*Math.sin(lat2))
+  return { lat: lat2*180/Math.PI, lng: lng2*180/Math.PI }
+}
+
+Do NOT use any library for these two functions. They are self-contained.
+
+---
+
+## PHASE 2 — ROUTING ENGINE
+File: lib/router.js
+
+### computePath(ship, zones)
+Simple waypoint deflection algorithm (NOT full A*):
+
+1. Start with a direct line from ship position to destination
+2. Generate 8 intermediate waypoints along that line (evenly spaced)
+3. For each waypoint:
+   - Check if it falls inside any zone polygon using turf.booleanPointInPolygon
+   - If inside: deflect the waypoint perpendicular to the line direction by
+     0.3 degrees (enough to skirt the zone). Try both left and right; pick
+     whichever is inside NAVIGABLE_WATER.
+4. Return the array of waypoints (always ends at destination)
+5. If destination itself is inside a zone: return [] and set status='stranded'
+
+### How to use Turf correctly (DO NOT deviate):
+const turf = require('@turf/turf')
+
+// Point check:
+const pt = turf.point([lng, lat])  // NOTE: turf is [lng, lat] not [lat, lng]
+const poly = turf.polygon([coordinates])
+const inside = turf.booleanPointInPolygon(pt, poly)
+
+// Distance:
+const dist = turf.distance(turf.point([lng1,lat1]), turf.point([lng2,lat2]),
+             { units: 'kilometers' })
+
+IMPORTANT: Turf uses [longitude, latitude] order everywhere.
+Your ship objects use { lat, lng }. Always convert: turf.point([ship.lng, ship.lat])
+
+---
+
+## PHASE 3 — GEOFENCE + PROXIMITY CHECKS
+File: lib/geofence.js
+
+### checkGeofences(ships, zones)
+- For each ship, for each zone: booleanPointInPolygon
+- If ship is inside a zone AND was not inside last tick:
+  emit 'alert:geofence' via the io instance with { shipId, zoneName, severity: 'high' }
+  set ship.status = 'rerouting', trigger computePath
+
+### checkProximity(ships)
+- Loop all pairs O(n²) — 15 ships = 105 pairs, fine
+- turf.distance between each pair
+- If < 2km AND pair not already warned:
+  emit 'alert:proximity' with { ship1Id, ship2Id, distanceKm }
+
+### Make io accessible to geofence.js:
+In server.js: pass io into simulator and geofence modules at startup.
+Pattern: geofence.init(io) then call geofence.checkAll(ships, zones) inside tick.
+
+---
+
+## PHASE 4 — WEATHER
+File: lib/weather.js
+
+### fetchWeather(lat, lng)
+Use Open-Meteo — free, no API key required.
+URL: https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lng}&current=wind_speed_10m&wind_speed_unit=ms
+
+Parse: data.current.wind_speed_10m
+If wind_speed_10m > 15: return { adverse: true, windSpeed }
+Else: return { adverse: false, windSpeed }
+
+Cache results per grid cell (round lat/lng to 1 decimal) for 60 seconds to
+avoid hammering the API on every tick. Use a simple Map() as cache.
+
+In simulator tick: every 60 ticks (60 seconds), refresh weather for all ships.
+Set ship.inWeather = fetchWeather result.adverse
+
+---
+
+## PHASE 5 — PLAYBACK RING BUFFER
+File: lib/playback.js
+
+const SNAPSHOT_INTERVAL = 30  // seconds
+const MAX_SNAPSHOTS = 120      // 60 minutes worth
+
+let snapshots = []
+let tickCount = 0
+
+function maybeSnapshot(ships) {
+  tickCount++
+  if (tickCount % SNAPSHOT_INTERVAL === 0) {
+    snapshots.push({
+      timestamp: Date.now(),
+      ships: JSON.parse(JSON.stringify(ships))  // deep clone
+    })
+    if (snapshots.length > MAX_SNAPSHOTS) snapshots.shift()
+  }
+}
+
+function getSnapshots() { return snapshots }
+
+Export both. Call maybeSnapshot(ships) inside simulator tick.
+Expose GET /api/playback in server.js that returns getSnapshots().
+
+---
+
+## PHASE 6 — SOCKET EVENT CONTRACTS
+
+Define these events clearly. Both server and client must use EXACT same names:
+
+SERVER → CLIENT:
+  'fleet:state'    — full ships array (on connection)
+  'fleet:update'   — full ships array (every tick)
+  'alert:geofence' — { shipId, zoneName, severity, timestamp }
+  'alert:proximity'— { ship1Id, ship2Id, distanceKm, timestamp }
+  'directive:sent' — { shipId, fromRole:'command', action, timestamp }
+  'directive:response'— { shipId, response:'ACCEPT'|'ESCALATE', message?, timestamp }
+  'zone:updated'   — { zones: allZones }
+
+CLIENT → SERVER:
+  'directive:send' — { shipId, action: 'reroute'|'hold'|'divert', params? }
+  'directive:respond'— { shipId, response: 'ACCEPT'|'ESCALATE', message? }
+  'zone:add'       — { polygon: GeoJSON polygon, name: string }
+  'zone:delete'    — { zoneId: string }
+
+---
+
+## PHASE 7 — NEXT.JS FRONTEND
+
+### hooks/useFleetSocket.js
+import { useEffect, useState, useRef } from 'react'
+import { io } from 'socket.io-client'
+
+export function useFleetSocket() {
+  const [ships, setShips] = useState([])
+  const [alerts, setAlerts] = useState([])
+  const [zones, setZones] = useState([])
+  const socketRef = useRef(null)
+
+  useEffect(() => {
+    const socket = io('http://localhost:3001')
+    socketRef.current = socket
+
+    socket.on('fleet:state', setShips)
+    socket.on('fleet:update', setShips)
+    socket.on('alert:geofence', alert => {
+      setAlerts(prev => [...prev, { ...alert, id: Date.now(), acked: false }])
+      // Play alert sound:
+      new Audio('/alert.mp3').play().catch(() => {})
+    })
+    socket.on('alert:proximity', alert => {
+      setAlerts(prev => [...prev, { ...alert, id: Date.now(), acked: false }])
+    })
+    socket.on('zone:updated', ({ zones }) => setZones(zones))
+
+    return () => socket.disconnect()
+  }, [])
+
+  const sendDirective = (shipId, action, params) =>
+    socketRef.current?.emit('directive:send', { shipId, action, params })
+
+  const respondDirective = (shipId, response, message) =>
+    socketRef.current?.emit('directive:respond', { shipId, response, message })
+
+  const ackAlert = (alertId) =>
+    setAlerts(prev => prev.map(a => a.id === alertId ? {...a, acked: true} : a))
+
+  const addZone = (polygon, name) =>
+    socketRef.current?.emit('zone:add', { polygon, name })
+
+  return { ships, alerts, zones, sendDirective, respondDirective, ackAlert, addZone }
+}
+
+### components/FleetMap.jsx
+Use dynamic import in pages with { ssr: false }:
+  const FleetMap = dynamic(() => import('../components/FleetMap'), { ssr: false })
+
+Inside FleetMap:
+- MapContainer center={[25.0, 57.0]} zoom={7}
+- TileLayer using CartoDB Positron (ocean-friendly):
+  url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+- For each ship: render <ShipMarker ship={ship} />
+- For each zone: render <Polygon positions={zone.coords} color="red" fillOpacity={0.15} />
+- If role==='command': render <FeatureGroup ref={drawRef}><EditControl .../></FeatureGroup>
+
+### Ship interpolation in ShipMarker.jsx
+Keep previous position in a useRef. On each render, if position changed,
+use a CSS transition or requestAnimationFrame lerp:
+
+const lerpPos = useRef({ lat: ship.lat, lng: ship.lng })
+useEffect(() => {
+  const start = { ...lerpPos.current }
+  const end = { lat: ship.lat, lng: ship.lng }
+  const startTime = performance.now()
+  const duration = 900  // ms — slightly under 1s tick
+
+  function step(now) {
+    const t = Math.min((now - startTime) / duration, 1)
+    lerpPos.current = {
+      lat: start.lat + (end.lat - start.lat) * t,
+      lng: start.lng + (end.lng - start.lng) * t,
+    }
+    markerRef.current?.setLatLng([lerpPos.current.lat, lerpPos.current.lng])
+    if (t < 1) requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}, [ship.lat, ship.lng])
+
+Use a ref to the Leaflet marker, call marker.setLatLng() directly — do NOT
+re-render React to move markers. This is critical for smooth animation.
+
+---
+
+## PHASE 8 — AI DISTRESS PARSING
+File: pages/api/distress.js
+
+import Anthropic from '@anthropic-ai/sdk'
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') return res.status(405).end()
+  const { message, shipId } = req.body
+
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 256,
+    messages: [{
+      role: 'user',
+      content: `You are a maritime emergency analyst. Extract structured data from this distress message.
+      
+Distress message: "${message}"
+
+Respond with ONLY valid JSON, no explanation:
+{
+  "severity": 1-5,
+  "incidentType": "fire|medical|mechanical|collision|weather|cargo|unknown",
+  "injuries": number or null,
+  "damagePct": 0-100 or null,
+  "immediateRisk": true|false,
+  "summary": "one sentence"
+}`
+    }]
+  })
+
+  try {
+    const parsed = JSON.parse(response.content[0].text)
+    res.json({ shipId, ...parsed })
+  } catch {
+    res.json({ shipId, severity: 3, incidentType: 'unknown', summary: message })
+  }
+}
+
+---
+
+## PHASE 9 — ROLE INTERFACES
+
+### pages/command.js
+- Uses useFleetSocket()
+- Left panel: FleetMap (full width map)
+- Right panel: AlertPanel showing all unacked alerts sorted by severity desc
+- Top bar: "FLEET COMMAND" label, connection status indicator
+- Clicking a ship marker: show popup with cargo, fuel %, speed, status, destination
+- Button per ship: "Issue Directive" → opens modal with options:
+  Hold Position | Reroute to Port (dropdown of 6 ports) | Divert to Waypoint
+- Zone drawing: Leaflet.draw toolbar visible only on this page
+
+### pages/captain.js
+- Get shipId from router.query.ship
+- Filters ships array for own ship only
+- Shows: own ship stats (fuel bar, status badge, cargo, speed)
+- Directive inbox: shows latest directive from command with ACCEPT / ESCALATE buttons
+- ESCALATE: shows textarea for distress message → POST to /api/distress → display result
+- If no ship query param: show error "No ship ID provided"
+
+---
+
+## PHASE 10 — DOCKER
+
+### Dockerfile
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+EXPOSE 3000 3001
+CMD ["node", "server.js"]
+
+### docker-compose.yml
+version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    restart: unless-stopped
+
+### server.js startup (handle both dev and prod):
+In server.js, after attaching Socket.IO, start Next.js:
+const next = require('next')
+const dev = process.env.NODE_ENV !== 'production'
+const app = next({ dev })
+app.prepare().then(() => {
+  // attach next request handler to express
+  server.all('*', app.getRequestHandler())
+  server.listen(3000, () => console.log('[SERVER] Next.js on :3000'))
+})
+// Socket.IO on separate port 3001
+
+---
+
+## PACKAGE.JSON DEPENDENCIES
+
+{
+  "dependencies": {
+    "next": "14.2.0",
+    "react": "18.3.0",
+    "react-dom": "18.3.0",
+    "socket.io": "4.7.5",
+    "socket.io-client": "4.7.5",
+    "express": "4.19.2",
+    "leaflet": "1.9.4",
+    "react-leaflet": "4.2.1",
+    "leaflet-draw": "1.0.4",
+    "@turf/turf": "6.5.0",
+    "@anthropic-ai/sdk": "0.20.9"
+  }
+}
+
+---
+
+## WHAT NOT TO BUILD (save time)
+
+- No authentication system. Roles are determined by URL only.
+  /command = Command role. /captain?ship=SHIP-01 = Captain role.
+- No database. All state is in Node.js memory.
+- No Firebase (anywhere in the hot path).
+- No bonus features until ALL phases 1–10 are verified working.
+- No TypeScript. Plain JavaScript only (faster to write under time pressure).
+- No CSS framework. Inline styles or a single styles.css file only.
+
+---
+
+## ENV VARIABLES
+
+Create .env.local:
+ANTHROPIC_API_KEY=your_key_here
+
+Document in README:
+Required env vars:
+  ANTHROPIC_API_KEY — get from console.anthropic.com
+
+---
+
+## BUILD ORDER FOR CURSOR
+
+Do these in strict sequence. Do not skip ahead.
+
+Phase 1: server.js + lib/simulator.js + fleet.json
+  ✓ Verify: node server.js starts, console shows tick logs every second
+
+Phase 2: lib/router.js
+  ✓ Verify: computePath(ship, []) returns array of waypoints ending at destination
+
+Phase 3: lib/geofence.js integrated into tick
+  ✓ Verify: drawing a test zone in memory triggers console alert log
+
+Phase 4: lib/weather.js integrated into tick
+  ✓ Verify: weather fetch logs wind speed for a few ships
+
+Phase 5: lib/playback.js + GET /api/playback
+  ✓ Verify: curl localhost:3001/api/playback returns [] initially, then fills
+
+Phase 6: hooks/useFleetSocket.js
+  ✓ Verify: console.log(ships) in a test page shows updating ship array
+
+Phase 7: FleetMap.jsx + ShipMarker.jsx + command.js
+  ✓ Verify: 15 ships visible and moving smoothly on map
+
+Phase 8: pages/api/distress.js
+  ✓ Verify: POST with test message returns structured JSON
+
+Phase 9: captain.js + DirectiveModal.jsx + AlertPanel.jsx
+  ✓ Verify: directive flows from command page → captain page in real time
+
+Phase 10: Dockerfile + docker-compose.yml
+  ✓ Verify: docker compose up brings system up, map loads at localhost:3000
+
+---
+
+## GRADING PRIORITY REMINDER
+
+60% — Core functionality (Phases 1–7 + 9)
+20% — AI integration (Phase 8)
+15% — Map quality + UI
+5%  — Code quality
+
+Build in that order. A working but ugly system scores far better than a
+beautiful broken one.
