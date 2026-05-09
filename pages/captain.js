@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/router';
 import { useFleetSocket } from '../hooks/useFleetSocket';
@@ -24,6 +24,29 @@ export default function CaptainPage() {
     });
   }, [ships, shipId]);
   const latestDirective = shipId ? directives[shipId] : undefined;
+
+  useEffect(() => {
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    const nextRoot = document.getElementById('__next');
+    const prevNextOverflow = nextRoot?.style.overflow || '';
+    const prevNextHeight = nextRoot?.style.height || '';
+    document.body.style.overflow = 'auto';
+    document.documentElement.style.overflow = 'auto';
+    if (nextRoot) {
+      nextRoot.style.overflow = 'auto';
+      nextRoot.style.height = 'auto';
+      nextRoot.style.minHeight = '100vh';
+    }
+    return () => {
+      document.body.style.overflow = prevBodyOverflow;
+      document.documentElement.style.overflow = prevHtmlOverflow;
+      if (nextRoot) {
+        nextRoot.style.overflow = prevNextOverflow;
+        nextRoot.style.height = prevNextHeight;
+      }
+    };
+  }, []);
 
   if (!shipId) {
     return <div className="error-page">No ship ID provided</div>;
