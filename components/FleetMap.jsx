@@ -65,8 +65,8 @@ export default function FleetMap({ ships, zones, role, onAddZone, onIssueDirecti
   return (
     <MapContainer center={[25.0, 57.0]} zoom={7} style={{ height: '100%', width: '100%' }}>
       <TileLayer
-        attribution='&copy; OpenStreetMap contributors &copy; CARTO'
-        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+        attribution='&copy; CartoDB'
+        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
       />
       {ships.map((ship) => (
         <ShipMarker key={ship.id} ship={ship} onIssueDirective={role === 'command' ? onIssueDirective : undefined} />

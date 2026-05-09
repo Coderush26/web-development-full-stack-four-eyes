@@ -7,7 +7,13 @@ export default function ZoneLayer({ zones }) {
         <Polygon
           key={zone.id}
           positions={zone.coords}
-          pathOptions={{ color: 'red', fillColor: 'red', fillOpacity: 0.15 }}
+          pathOptions={{
+            color: '#ef4444',
+            fillColor: '#ef4444',
+            fillOpacity: 0.1,
+            weight: 2,
+            dashArray: '8 4'
+          }}
         />
       ))}
     </>

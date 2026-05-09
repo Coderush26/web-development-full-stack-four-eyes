@@ -1,10 +1,6 @@
 function severityScore(alert) {
-  if (alert.severity === 'high') {
-    return 5;
-  }
-  if (typeof alert.severity === 'number') {
-    return alert.severity;
-  }
+  if (alert.severity === 'high') return 5;
+  if (typeof alert.severity === 'number') return alert.severity;
   return 1;
 }
 
@@ -13,20 +9,24 @@ export default function AlertPanel({ alerts, onAck }) {
     .filter((alert) => !alert.acked)
     .sort((a, b) => severityScore(b) - severityScore(a));
 
+  if (unacked.length === 0) {
+    return <p style={{ fontSize: '0.75rem', color: '#475569', margin: 0 }}>No active alerts.</p>;
+  }
+
   return (
-    <aside className="panel">
-      <h3>Alerts</h3>
-      {unacked.length === 0 ? <p>No active alerts.</p> : null}
+    <>
       {unacked.map((alert) => (
         <div className="alert-card" key={alert.id}>
-          <strong>{alert.zoneName ? 'Geofence Alert' : 'Proximity Alert'}</strong>
-          <div>{alert.zoneName ? `Ship ${alert.shipId} entered ${alert.zoneName}` : `${alert.ship1Id} near ${alert.ship2Id}`}</div>
+          <strong>{alert.zoneName ? '🛑 Geofence' : '⚠️ Proximity'}</strong>
+          <div>{alert.zoneName ? `${alert.shipId} entered ${alert.zoneName}` : `${alert.ship1Id} ↔ ${alert.ship2Id}`}</div>
           <small>{new Date(alert.timestamp || Date.now()).toLocaleTimeString()}</small>
-          <button className="btn-secondary" type="button" onClick={() => onAck(alert.id)}>
-            Acknowledge
-          </button>
+          <div style={{ marginTop: 6 }}>
+            <button className="btn-danger" type="button" onClick={() => onAck(alert.id)} style={{ fontSize: '0.68rem', padding: '4px 10px' }}>
+              Acknowledge
+            </button>
+          </div>
         </div>
       ))}
-    </aside>
+    </>
   );
 }
