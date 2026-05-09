@@ -6,6 +6,7 @@ const geofence = require('./lib/geofence');
 const router = require('./lib/router');
 const playback = require('./lib/playback');
 const weather = require('./lib/weather');
+const prisEngine = require('./server/prisEngine');
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const INCIDENT_TYPES = new Set(['fire', 'medical', 'mechanical', 'collision', 'weather', 'cargo', 'unknown']);
@@ -31,6 +32,10 @@ let zones = [];
 const latestDirectives = new Map();
 const pendingAcceptedDirectives = new Map();
 let alerts = [];
+const trackedShips = new Map();
+const latestIntelligenceByShip = new Map();
+let emergencyEventsToday = 0;
+let emergencyCountDate = new Date().toDateString();
 
 function toLeafletCoords(geoJsonPolygon) {
   const outerRing = geoJsonPolygon?.coordinates?.[0] || [];
@@ -222,6 +227,103 @@ function rerouteShipsIntersectingZones(reason) {
   }
 }
 
+function getModeIntervalMs(mode) {
+  if (mode === 'deepScan') return 3000;
+  if (mode === 'paused') return Number.POSITIVE_INFINITY;
+  return 8000;
+}
+
+function getBackendLoadIndicator() {
+  const active = Array.from(trackedShips.values()).filter((entry) => entry.active).length;
+  if (active >= 7) return 'high';
+  if (active >= 4) return 'medium';
+  return 'low';
+}
+
+function emitPrisMetrics() {
+  const today = new Date().toDateString();
+  if (today !== emergencyCountDate) {
+    emergencyCountDate = today;
+    emergencyEventsToday = 0;
+  }
+  const trackedEntries = Array.from(trackedShips.entries());
+  const activeEntries = trackedEntries.filter(([, entry]) => entry.active);
+  const activeRiskScores = activeEntries
+    .map(([shipId]) => latestIntelligenceByShip.get(shipId)?.routeAnalysis?.riskScore)
+    .filter((value) => typeof value === 'number');
+  const averageRiskScore = activeRiskScores.length
+    ? Math.round(activeRiskScores.reduce((sum, value) => sum + value, 0) / activeRiskScores.length)
+    : 0;
+
+  io.emit('pris:system:metrics', {
+    timestamp: Date.now(),
+    activePrisShips: activeEntries.length,
+    trackedShips: trackedEntries.length,
+    averageRiskScore,
+    emergencyEventsToday,
+    backendLoad: getBackendLoadIndicator()
+  });
+}
+
+function emitTrackedShipsState() {
+  io.emit('pris:tracked:state', Object.fromEntries(trackedShips.entries()));
+}
+
+function updateTrackedShip(shipId, patch) {
+  const current = trackedShips.get(shipId) || {
+    active: true,
+    lastUpdate: 0,
+    mode: 'standard',
+    routeStatus: 'monitoring'
+  };
+  trackedShips.set(shipId, { ...current, ...patch });
+  emitTrackedShipsState();
+  emitPrisMetrics();
+}
+
+function emitRouteIntelligence(shipId, forcedRoutePoints, modeOverride) {
+  const ship = simulator.getShip(shipId);
+  if (!ship) {
+    return null;
+  }
+  const tracked = trackedShips.get(shipId);
+  const mode = modeOverride || tracked?.mode || 'standard';
+  const snapshot = prisEngine.buildIntelligenceSnapshot({
+    ship,
+    ships: simulator.getAllShips(),
+    zones,
+    getWeatherRiskAt: weather.getWeatherRiskSync,
+    forcedRoutePoints,
+    mode
+  });
+  latestIntelligenceByShip.set(shipId, snapshot);
+  updateTrackedShip(shipId, {
+    active: mode !== 'paused',
+    mode,
+    lastUpdate: Date.now(),
+    routeStatus: snapshot.routeAnalysis?.recommendation?.action === 'REROUTE' ? 'reroute-advised' : 'monitoring'
+  });
+  io.emit('route:intelligence:update', snapshot);
+
+  if (snapshot.routeAnalysis.riskScore >= 86) {
+    const today = new Date().toDateString();
+    if (today !== emergencyCountDate) {
+      emergencyCountDate = today;
+      emergencyEventsToday = 0;
+    }
+    emergencyEventsToday += 1;
+    io.emit('emergency:intelligence:broadcast', {
+      shipId,
+      timestamp: Date.now(),
+      severity: snapshot.routeAnalysis.threatLevel,
+      riskScore: snapshot.routeAnalysis.riskScore,
+      message: `Critical predictive risk for ${shipId}: ${snapshot.routeAnalysis.threats[0] || 'Escalation detected'}`
+    });
+    emitPrisMetrics();
+  }
+  return snapshot;
+}
+
 app.get('/health', (_req, res) => {
   res.json({
     ok: true,
@@ -285,6 +387,9 @@ io.on('connection', (socket) => {
   socket.emit('zone:updated', { zones });
   socket.emit('alert:state', alerts);
   socket.emit('directive:state', Object.fromEntries(latestDirectives.entries()));
+  socket.emit('route:intelligence:state', Object.fromEntries(latestIntelligenceByShip.entries()));
+  socket.emit('pris:tracked:state', Object.fromEntries(trackedShips.entries()));
+  emitPrisMetrics();
 
   const handshakedShipId = socket.handshake.query?.shipId;
   if (typeof handshakedShipId === 'string' && latestDirectives.has(handshakedShipId)) {
@@ -308,6 +413,58 @@ io.on('connection', (socket) => {
     };
     latestDirectives.set(shipId, directive);
     io.emit('directive:sent', directive);
+  });
+
+  socket.on('ship:selected', (payload) => {
+    const shipId = payload?.shipId;
+    if (!shipId) {
+      return;
+    }
+    updateTrackedShip(shipId, {
+      active: true,
+      mode: trackedShips.get(shipId)?.mode === 'deepScan' ? 'deepScan' : 'standard'
+    });
+    emitRouteIntelligence(shipId);
+  });
+
+  socket.on('ship:apply_ai_reroute', (payload) => {
+    const shipId = payload?.shipId;
+    if (!shipId) {
+      return;
+    }
+    const baseline = latestIntelligenceByShip.get(shipId) || emitRouteIntelligence(shipId);
+    if (!baseline) {
+      return;
+    }
+    const alternativePoints = prisEngine.buildAlternativeRoutePoints(baseline);
+    emitRouteIntelligence(shipId, alternativePoints);
+  });
+
+  socket.on('pris:ship:pause', (payload) => {
+    const shipId = payload?.shipId;
+    if (!shipId) return;
+    updateTrackedShip(shipId, { active: false, mode: 'paused', routeStatus: 'paused' });
+  });
+
+  socket.on('pris:ship:resume', (payload) => {
+    const shipId = payload?.shipId;
+    if (!shipId) return;
+    updateTrackedShip(shipId, { active: true, mode: 'standard', routeStatus: 'monitoring' });
+    emitRouteIntelligence(shipId, undefined, 'standard');
+  });
+
+  socket.on('pris:ship:deep_scan', (payload) => {
+    const shipId = payload?.shipId;
+    if (!shipId) return;
+    updateTrackedShip(shipId, { active: true, mode: 'deepScan', routeStatus: 'deep-scan-active' });
+    emitRouteIntelligence(shipId, undefined, 'deepScan');
+  });
+
+  socket.on('pris:ship:force_recompute', (payload) => {
+    const shipId = payload?.shipId;
+    if (!shipId) return;
+    const mode = trackedShips.get(shipId)?.mode || 'standard';
+    emitRouteIntelligence(shipId, undefined, mode);
   });
 
   socket.on('directive:respond', async (payload) => {
@@ -406,6 +563,9 @@ io.on('connection', (socket) => {
     zones = [...zones, zone];
     io.emit('zone:updated', { zones });
     rerouteShipsIntersectingZones('zone_add');
+    for (const [trackedShipId, entry] of trackedShips.entries()) {
+      if (entry.active) emitRouteIntelligence(trackedShipId);
+    }
   });
 
   socket.on('zone:update', (payload) => {
@@ -420,12 +580,18 @@ io.on('connection', (socket) => {
     ));
     io.emit('zone:updated', { zones });
     rerouteShipsIntersectingZones('zone_edit');
+    for (const [trackedShipId, entry] of trackedShips.entries()) {
+      if (entry.active) emitRouteIntelligence(trackedShipId);
+    }
   });
 
   socket.on('zone:delete', (payload) => {
     zones = zones.filter((zone) => zone.id !== payload?.zoneId);
     io.emit('zone:updated', { zones });
     rerouteShipsIntersectingZones('zone_delete');
+    for (const [trackedShipId, entry] of trackedShips.entries()) {
+      if (entry.active) emitRouteIntelligence(trackedShipId);
+    }
   });
 
   socket.on('disconnect', () => {
@@ -445,6 +611,16 @@ function start() {
           directive.status = 'applied';
           io.emit('directive:sent', directive);
           pendingAcceptedDirectives.delete(directive.id);
+        }
+        for (const [trackedShipId, entry] of trackedShips.entries()) {
+          if (!entry.active || entry.mode === 'paused') {
+            continue;
+          }
+          const intervalMs = getModeIntervalMs(entry.mode);
+          const due = (Date.now() - (entry.lastUpdate || 0)) >= intervalMs;
+          if (due) {
+            emitRouteIntelligence(trackedShipId, undefined, entry.mode);
+          }
         }
       },
       onAlerts: (nextAlerts) => {

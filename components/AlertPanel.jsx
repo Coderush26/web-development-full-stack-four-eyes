@@ -6,7 +6,7 @@ function severityScore(alert) {
 
 export default function AlertPanel({ alerts, onAck }) {
   const unacked = alerts
-    .filter((alert) => !alert.acked)
+    .filter((alert) => alert.status === 'active')
     .sort((a, b) => severityScore(b) - severityScore(a));
 
   if (unacked.length === 0) {
@@ -16,9 +16,17 @@ export default function AlertPanel({ alerts, onAck }) {
   return (
     <>
       {unacked.map((alert) => (
-        <div className="alert-card" key={alert.id}>
-          <strong>{alert.zoneName ? '🛑 Geofence' : '⚠️ Proximity'}</strong>
-          <div>{alert.zoneName ? `${alert.shipId} entered ${alert.zoneName}` : `${alert.ship1Id} ↔ ${alert.ship2Id}`}</div>
+        <div className={`alert-card severity-${severityScore(alert) >= 5 ? 'emergency' : severityScore(alert) >= 4 ? 'critical' : severityScore(alert) >= 2 ? 'warning' : 'normal'}`} key={alert.id}>
+          <strong>
+            {alert.type === 'distress' ? '🚨 Distress'
+              : alert.zoneName ? '🛑 Geofence'
+                : '⚠️ Proximity'}
+          </strong>
+          <div>
+            {alert.message || (alert.zoneName
+              ? `${alert.shipId} entered ${alert.zoneName}`
+              : `${alert.ship1Id} ↔ ${alert.ship2Id}`)}
+          </div>
           <small>{new Date(alert.timestamp || Date.now()).toLocaleTimeString()}</small>
           <div style={{ marginTop: 6 }}>
             <button className="btn-danger" type="button" onClick={() => onAck(alert.id)} style={{ fontSize: '0.68rem', padding: '4px 10px' }}>

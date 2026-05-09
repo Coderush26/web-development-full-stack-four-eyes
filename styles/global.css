@@ -16,6 +16,48 @@ html, body, #__next {
   display: grid;
   grid-template-columns: 280px 1fr;
   grid-template-rows: 1fr;
+  transition: grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.layout.collapsed {
+  grid-template-columns: 80px 1fr;
+}
+
+.layout::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(14, 165, 233, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(14, 165, 233, 0.04) 1px, transparent 1px);
+  background-size: 36px 36px;
+  z-index: 0;
+}
+
+.layout.op-warning .main-content,
+.layout.op-critical .main-content,
+.layout.op-emergency .main-content {
+  animation: tacticalPulse 2.8s ease-in-out infinite;
+}
+
+.layout.op-critical .main-content {
+  box-shadow: inset 0 0 120px rgba(239, 68, 68, 0.08);
+}
+
+.layout.op-emergency .main-content {
+  box-shadow: inset 0 0 160px rgba(239, 68, 68, 0.18);
+}
+
+.layout.system-emergency .sidebar,
+.layout.system-emergency .playback-panel {
+  opacity: 0.78;
+}
+
+@keyframes tacticalPulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.03); }
 }
 
 /* ─── LEFT SIDEBAR ─── */
@@ -127,6 +169,15 @@ html, body, #__next {
   box-shadow: 0 0 15px rgba(139, 92, 246, 0.08);
 }
 
+.ship-card.severity-warning { border-color: rgba(245, 158, 11, 0.24); }
+.ship-card.severity-critical { border-color: rgba(248, 113, 113, 0.34); box-shadow: 0 0 20px rgba(248, 113, 113, 0.08); }
+.ship-card.severity-emergency { border-color: rgba(239, 68, 68, 0.45); box-shadow: 0 0 24px rgba(239, 68, 68, 0.15); animation: emergencyFlash 1s step-end infinite; }
+
+@keyframes emergencyFlash {
+  0%, 100% { background: rgba(239, 68, 68, 0.08); }
+  50% { background: rgba(239, 68, 68, 0.22); }
+}
+
 .ship-card-icon {
   width: 34px;
   height: 34px;
@@ -141,6 +192,9 @@ html, body, #__next {
 .ship-card-icon.rerouting { background: rgba(251, 191, 36, 0.12); }
 .ship-card-icon.stopped { background: rgba(239, 68, 68, 0.12); }
 .ship-card-icon.stranded { background: rgba(239, 68, 68, 0.2); }
+.ship-card-icon.warning { box-shadow: 0 0 16px rgba(245, 158, 11, 0.3); }
+.ship-card-icon.critical { box-shadow: 0 0 16px rgba(248, 113, 113, 0.35); }
+.ship-card-icon.emergency { box-shadow: 0 0 22px rgba(239, 68, 68, 0.55); }
 
 .ship-card-info { flex: 1; min-width: 0; }
 
@@ -160,6 +214,20 @@ html, body, #__next {
   margin-top: 2px;
 }
 
+.ship-progress {
+  height: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ship-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #22d3ee, #8b5cf6);
+  transition: width 0.8s ease;
+}
+
 .ship-card-status {
   font-size: 0.65rem;
   font-weight: 600;
@@ -170,9 +238,9 @@ html, body, #__next {
 }
 
 .ship-card-status.normal { background: rgba(34, 197, 94, 0.15); color: #86efac; }
-.ship-card-status.rerouting { background: rgba(251, 191, 36, 0.15); color: #fde68a; }
-.ship-card-status.stopped { background: rgba(239, 68, 68, 0.15); color: #fca5a5; }
-.ship-card-status.stranded { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+.ship-card-status.warning { background: rgba(245, 158, 11, 0.15); color: #fcd34d; }
+.ship-card-status.critical { background: rgba(239, 68, 68, 0.15); color: #fca5a5; }
+.ship-card-status.emergency { background: rgba(239, 68, 68, 0.26); color: #fee2e2; }
 
 /* ─── SIDEBAR ALERTS ─── */
 .sidebar-alerts {
@@ -193,15 +261,56 @@ html, body, #__next {
 }
 
 .alert-card:hover { background: rgba(239, 68, 68, 0.1); }
+.alert-card.severity-warning { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.08); }
+.alert-card.severity-critical { border-left-color: #ef4444; }
+.alert-card.severity-emergency { border-left-color: #dc2626; box-shadow: 0 0 18px rgba(239, 68, 68, 0.25); animation: emergencyFlash 1s linear infinite; }
 
 .alert-card strong { font-size: 0.78rem; color: #fca5a5; }
 .alert-card div { font-size: 0.72rem; color: #94a3b8; margin-top: 2px; }
 .alert-card small { font-size: 0.65rem; color: #475569; }
 
+/* ─── SIDEBAR COLLAPSED STATE ─── */
+.layout.collapsed .sidebar-brand h1,
+.layout.collapsed .sidebar-status,
+.layout.collapsed .sidebar-section-title,
+.layout.collapsed .ship-card-info,
+.layout.collapsed .ship-card-status,
+.layout.collapsed .sidebar-alerts {
+  display: none;
+}
+
+.layout.collapsed .sidebar-brand {
+  justify-content: center;
+}
+
+.layout.collapsed .sidebar-header {
+  padding: 20px 0 16px;
+}
+
+.layout.collapsed .ship-card {
+  justify-content: center;
+  padding: 10px 0;
+}
+
 /* ─── MAIN CONTENT AREA ─── */
 .main-content {
   position: relative;
   overflow: hidden;
+}
+
+.global-emergency-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 990;
+  background: linear-gradient(90deg, rgba(127, 29, 29, 0.95), rgba(220, 38, 38, 0.95));
+  color: #fee2e2;
+  border-bottom: 1px solid rgba(254, 202, 202, 0.35);
+  padding: 8px 14px;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  animation: emergencyFlash 1s linear infinite;
 }
 
 .map-container {
@@ -224,6 +333,290 @@ html, body, #__next {
   padding: 20px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 40px rgba(139, 92, 246, 0.06);
   transition: all 0.3s ease;
+}
+
+.incident-focus-panel {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 801;
+  width: 340px;
+  background: rgba(8, 12, 20, 0.9);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
+}
+
+.incident-focus-panel.severity-critical,
+.incident-focus-panel.severity-emergency {
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.incident-focus-panel.severity-emergency {
+  animation: emergencyFlash 1s linear infinite;
+}
+
+.incident-focus-title {
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  color: #fca5a5;
+  margin-bottom: 8px;
+}
+
+.incident-focus-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.incident-focus-main strong { font-size: 1rem; }
+.incident-focus-main span { font-size: 0.76rem; color: #fbbf24; text-transform: uppercase; }
+
+.incident-focus-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+
+.incident-focus-panel p {
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  margin-bottom: 10px;
+}
+
+.incident-focus-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ai-command-panel {
+  position: absolute;
+  right: 20px;
+  bottom: 82px;
+  width: 340px;
+  max-height: 320px;
+  z-index: 801;
+  background: rgba(10, 15, 28, 0.9);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: 14px;
+  padding: 12px;
+  backdrop-filter: blur(12px);
+}
+
+.pris-ops-panel {
+  position: absolute;
+  right: 372px;
+  bottom: 82px;
+  width: 360px;
+  max-height: 320px;
+  z-index: 801;
+  background: rgba(10, 15, 28, 0.92);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 14px;
+  padding: 12px;
+  backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+}
+
+.pris-ops-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.pris-ops-header strong { font-size: 0.82rem; color: #c4b5fd; }
+.pris-ops-header span { font-size: 0.62rem; color: #64748b; letter-spacing: 0.08em; }
+
+.pris-ops-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.pris-ops-stats div {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  padding: 6px;
+}
+
+.pris-ops-stats span {
+  display: block;
+  font-size: 0.62rem;
+  color: #64748b;
+}
+
+.pris-ops-stats strong {
+  font-size: 0.75rem;
+  color: #e2e8f0;
+}
+
+.pris-ops-stats .load-low { color: #22c55e; }
+.pris-ops-stats .load-medium { color: #f59e0b; }
+.pris-ops-stats .load-high { color: #ef4444; }
+
+.pris-ops-list {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pris-empty {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  margin: 6px 0;
+}
+
+.pris-ship-card {
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.66);
+  padding: 8px;
+}
+
+.pris-ship-card.active { border-left: 3px solid #22d3ee; }
+.pris-ship-card.paused { border-left: 3px solid #64748b; opacity: 0.78; }
+
+.pris-ship-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.74rem;
+  margin-bottom: 4px;
+}
+
+.pris-ship-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.64rem;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.pris-ship-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.pris-ship-actions .btn-secondary,
+.pris-ship-actions .btn-primary {
+  padding: 5px 8px;
+  font-size: 0.66rem;
+}
+
+.ai-command-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.ai-command-header strong { font-size: 0.82rem; color: #67e8f9; }
+.ai-command-header span { font-size: 0.68rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; }
+
+.ai-streaming {
+  font-size: 0.72rem;
+  color: #a5f3fc;
+  margin-bottom: 8px;
+  animation: pulse-dot 1.3s linear infinite;
+}
+
+.ai-feed-list {
+  max-height: 238px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-route-analysis {
+  border: 1px solid rgba(56, 189, 248, 0.24);
+  border-left: 4px solid #22d3ee;
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(8, 47, 73, 0.28);
+  margin-bottom: 8px;
+}
+
+.ai-route-analysis.severity-warning {
+  border-left-color: #f59e0b;
+}
+
+.ai-route-analysis.severity-critical {
+  border-left-color: #ef4444;
+}
+
+.ai-route-analysis h4 {
+  font-size: 0.75rem;
+  color: #bae6fd;
+  margin-bottom: 6px;
+}
+
+.ai-route-threat {
+  font-size: 0.74rem;
+  margin-bottom: 6px;
+  color: #f8fafc;
+}
+
+.ai-route-analysis ul {
+  margin: 0 0 8px 16px;
+  color: #cbd5e1;
+  font-size: 0.72rem;
+}
+
+.ai-route-analysis p {
+  font-size: 0.72rem;
+  color: #e2e8f0;
+  margin-bottom: 8px;
+}
+
+.ai-route-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ai-route-footer span {
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+.ai-feed-card {
+  border: 1px solid rgba(56, 189, 248, 0.15);
+  border-left: 3px solid #22d3ee;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.65);
+}
+
+.ai-feed-card.severity-warning { border-left-color: #f59e0b; }
+.ai-feed-card.severity-critical,
+.ai-feed-card.severity-emergency { border-left-color: #ef4444; }
+
+.ai-feed-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: #bae6fd;
+  margin-bottom: 4px;
+}
+
+.ai-feed-card p {
+  font-size: 0.74rem;
+  color: #cbd5e1;
+  margin-bottom: 4px;
+}
+
+.ai-feed-card small {
+  color: #64748b;
+  font-size: 0.65rem;
 }
 
 .telemetry-card-header {
@@ -457,6 +850,7 @@ input, select, textarea {
   font-family: inherit;
   font-size: 0.85rem;
   transition: border-color 0.2s ease;
+  color-scheme: dark;
 }
 
 input:focus, select:focus, textarea:focus {
@@ -466,6 +860,31 @@ input:focus, select:focus, textarea:focus {
 }
 
 textarea { min-height: 100px; resize: vertical; }
+
+/* Keep native dropdown menus in tactical dark theme */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #94a3b8 50%),
+    linear-gradient(135deg, #94a3b8 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) calc(50% - 3px),
+    calc(100% - 11px) calc(50% - 3px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 30px;
+}
+
+select option {
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+select option:disabled {
+  color: #64748b;
+}
 
 /* ─── PLAYBACK SLIDER ─── */
 .playback-panel {
@@ -484,6 +903,23 @@ textarea { min-height: 100px; resize: vertical; }
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.playback-markers {
+  margin-top: 10px;
+  display: flex;
+  gap: 4px;
+}
+
+.playback-marker {
+  width: 10px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.35);
+}
+
+.playback-marker.alert {
+  background: rgba(239, 68, 68, 0.55);
 }
 
 .playback-label {
@@ -621,6 +1057,36 @@ textarea { min-height: 100px; resize: vertical; }
 
 /* ─── MAP MARKERS ─── */
 .ship-icon { background: none !important; border: none !important; }
+
+.future-route-glow {
+  filter: drop-shadow(0 0 8px rgba(34, 211, 238, 0.8));
+}
+
+.danger-segment-pulse {
+  animation: dangerPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes dangerPulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+.risk-pin-wrap {
+  background: transparent !important;
+  border: none !important;
+}
+
+.risk-pin {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(239, 68, 68, 0.55);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.38);
+  font-size: 0.62rem;
+}
 
 /* ─── LEAFLET OVERRIDES ─── */
 .leaflet-popup-content-wrapper {

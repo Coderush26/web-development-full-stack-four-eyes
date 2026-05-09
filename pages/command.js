@@ -15,12 +15,47 @@ const PORTS = [
   { name: 'Port of Muscat', lat: 23.62, lng: 58.59 }
 ];
 
+function severityLabelFromScore(score) {
+  if (score >= 5) return 'emergency';
+  if (score >= 4) return 'critical';
+  if (score >= 2) return 'warning';
+  return 'normal';
+}
+
+function scoreFromAlert(alert) {
+  if (typeof alert.severity === 'number') return alert.severity;
+  if (alert.severity === 'high') return 4;
+  return 1;
+}
+
 export default function CommandPage() {
-  const { ships, alerts, zones, connected, ackAlert, addZone, sendDirective } = useFleetSocket();
+  const {
+    ships,
+    alerts,
+    distressEvents,
+    zones,
+    connected,
+    ackAlert,
+    addZone,
+    sendDirective,
+    routeIntelligenceByShip,
+    emergencyBroadcast,
+    selectShipForIntelligence,
+    applyAiReroute,
+    prisTrackedShips,
+    prisSystemMetrics,
+    pausePrisShip,
+    resumePrisShip,
+    deepScanPrisShip,
+    forceRecomputePrisShip
+  } = useFleetSocket();
   const [selectedShip, setSelectedShip] = useState(null);
   const [inspectedShip, setInspectedShip] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
   const [playbackIndex, setPlaybackIndex] = useState(-1);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [isReplaying, setIsReplaying] = useState(false);
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
 
   useEffect(() => { console.log('[PHASE 9 COMPLETE]'); }, []);
 
@@ -37,17 +72,40 @@ export default function CommandPage() {
   }, []);
 
   const sortedShips = useMemo(
-    () => [...ships].sort((a, b) => a.id.localeCompare(b.id)),
-    [ships]
+    () => [...ships]
+      .map((ship) => {
+        const shipAlerts = alerts.filter((alert) => alert.shipId === ship.id || alert.ship1Id === ship.id || alert.ship2Id === ship.id);
+        const topAlertScore = shipAlerts.length ? Math.max(...shipAlerts.map(scoreFromAlert)) : 1;
+        const severe = severityLabelFromScore(topAlertScore);
+        const type = ship.cargo?.toLowerCase().includes('oil') ? 'tanker'
+          : ship.cargo?.toLowerCase().includes('patrol') ? 'patrol'
+            : 'cargo';
+        return {
+          ...ship,
+          severityLevel: severe,
+          collisionRisk: shipAlerts.some((a) => a.type === 'proximity') ? 0.8 : 0.1,
+          signalQuality: ship.status === 'stopped' ? 'low' : topAlertScore >= 4 ? 'degraded' : 'stable',
+          etaMinutes: ship.path?.length ? Math.round((ship.path.length / Math.max(ship.speed, 5)) * 10) : 0,
+          routeProgress: ship.path?.length ? Math.max(5, 100 - Math.min(ship.path.length * 5, 92)) : 100,
+          type
+        };
+      })
+      .sort((a, b) => {
+        const diff = ['normal', 'warning', 'critical', 'emergency'].indexOf(b.severityLevel)
+          - ['normal', 'warning', 'critical', 'emergency'].indexOf(a.severityLevel);
+        return diff || a.id.localeCompare(b.id);
+      }),
+    [ships, alerts]
   );
 
-  const displayShips = playbackIndex === -1 ? ships : (snapshots[playbackIndex]?.ships || []);
+  const displayShips = playbackIndex === -1 ? sortedShips : (snapshots[playbackIndex]?.ships || []);
+  const renderedShips = displayShips;
 
   // Keep inspected ship data fresh
   const liveInspected = useMemo(() => {
     if (!inspectedShip) return null;
-    return displayShips.find(s => s.id === inspectedShip.id) || inspectedShip;
-  }, [inspectedShip, displayShips]);
+    return renderedShips.find(s => s.id === inspectedShip.id) || inspectedShip;
+  }, [inspectedShip, renderedShips]);
 
   const fuelPct = useCallback((ship) => {
     if (!ship?.fuelCapacity) return 0;
@@ -61,17 +119,159 @@ export default function CommandPage() {
   }, []);
 
   const unackedAlerts = useMemo(
-    () => alerts.filter(a => !a.acked),
+    () => alerts.filter((a) => a.status === 'active'),
     [alerts]
   );
 
+  const activeIncident = useMemo(() => {
+    const mostSevereAlert = [...unackedAlerts]
+      .sort((a, b) => scoreFromAlert(b) - scoreFromAlert(a))[0];
+    if (!mostSevereAlert) return null;
+    const ship = sortedShips.find((s) => s.id === mostSevereAlert.shipId || s.id === mostSevereAlert.ship1Id);
+    return {
+      ...mostSevereAlert,
+      severityLevel: severityLabelFromScore(scoreFromAlert(mostSevereAlert)),
+      ship
+    };
+  }, [unackedAlerts, sortedShips]);
+
+  const aiFeed = useMemo(() => {
+    const synthesizedFromAlerts = unackedAlerts.slice(0, 6).map((alert) => ({
+      id: alert.id,
+      timestamp: alert.createdAt || alert.timestamp || Date.now(),
+      severity: severityLabelFromScore(scoreFromAlert(alert)),
+      threat: alert.type === 'proximity' ? 'Collision Probability Rising'
+        : alert.type === 'geofence' ? 'Restricted Zone Violation'
+          : alert.type === 'distress' ? `Distress: ${alert.incidentType || 'unknown'}`
+            : 'Operational anomaly',
+      confidence: Math.min(97, 72 + scoreFromAlert(alert) * 5),
+      recommendation: alert.type === 'proximity'
+        ? 'Reduce vessel speed by 15% and increase separation corridor.'
+        : alert.type === 'geofence'
+          ? 'Reroute eastbound outside geofence and acknowledge zone breach.'
+          : 'Escalate emergency protocol and dispatch nearest support vessel.'
+    }));
+
+    const distressFeed = distressEvents.map((event, index) => ({
+      id: `${event.shipId}-${event.incidentType}-${index}`,
+      timestamp: Date.now() - (index * 15000),
+      severity: severityLabelFromScore(event.severity || 3),
+      threat: `${event.shipId}: ${event.incidentType || 'distress'} escalation`,
+      confidence: Math.min(99, 70 + (event.severity || 3) * 6),
+      recommendation: event.immediateRisk
+        ? 'Immediate speed reduction, reroute, and emergency support dispatch.'
+        : 'Monitor telemetry and apply captain guidance protocol.'
+    }));
+
+    return [...distressFeed, ...synthesizedFromAlerts]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 8);
+  }, [unackedAlerts, distressEvents]);
+
+  const tacticalInspection = useMemo(() => {
+    if (!liveInspected) return { enabled: false };
+    const update = routeIntelligenceByShip[liveInspected.id];
+    if (!update) {
+      return { enabled: true, shipId: liveInspected.id, ship: liveInspected, pending: true };
+    }
+    const routeModel = {
+      id: liveInspected.id,
+      name: liveInspected.name,
+      origin: update.updatedRoute?.fullPath?.[0] || { lat: liveInspected.lat, lng: liveInspected.lng },
+      destination: liveInspected.destination,
+      currentPosition: { lat: liveInspected.lat, lng: liveInspected.lng },
+      route: {
+        fullPath: update.updatedRoute?.fullPath || [],
+        completed: update.updatedRoute?.completed || [],
+        remaining: update.updatedRoute?.remaining || []
+      }
+    };
+    const riskIntelligence = {
+      points: update.updatedRoute?.riskAnnotatedPoints || [],
+      overallRouteRisk: update.routeAnalysis?.riskScore || 0,
+      threatLevel: (update.routeAnalysis?.threatLevel || 'LOW').toLowerCase(),
+      confidence: update.routeAnalysis?.confidence || 0,
+      threats: update.routeAnalysis?.threats || [],
+      recommendation: update.routeAnalysis?.recommendation?.reason || 'Continue monitoring',
+      dangerousSegments: (update.updatedRoute?.riskAnnotatedPoints || [])
+        .filter((point) => point.risk?.totalRisk >= 70)
+        .map((point) => point.sequence)
+    };
+    return {
+      enabled: true,
+      shipId: liveInspected.id,
+      ship: liveInspected,
+      routeModel,
+      riskIntelligence
+    };
+  }, [liveInspected, routeIntelligenceByShip]);
+
+  const aiRouteCard = useMemo(() => {
+    if (!tacticalInspection.enabled || tacticalInspection.pending) return null;
+    const remainingPoints = tacticalInspection.routeModel?.route?.remaining;
+    if (!Array.isArray(remainingPoints)) return null;
+    const risk = tacticalInspection.riskIntelligence;
+    const etaMinutes = Math.max(6, Math.round((remainingPoints.length / Math.max(tacticalInspection.ship.speed || 8, 6)) * 4));
+    return {
+      threatLevel: risk.threatLevel.toUpperCase(),
+      routeRiskPct: risk.overallRouteRisk,
+      threats: risk.threats.length ? risk.threats : ['No major threats detected'],
+      recommendation: risk.recommendation,
+      confidence: risk.confidence,
+      etaMinutes
+    };
+  }, [tacticalInspection]);
+
+  const prisTrackedRows = useMemo(() => (
+    Object.entries(prisTrackedShips || {}).map(([shipId, state]) => {
+      const ship = sortedShips.find((item) => item.id === shipId);
+      const intelligence = routeIntelligenceByShip[shipId];
+      return {
+        shipId,
+        shipName: ship?.name || shipId,
+        mode: state.mode || 'standard',
+        active: Boolean(state.active),
+        routeStatus: state.routeStatus || 'monitoring',
+        riskScore: intelligence?.routeAnalysis?.riskScore ?? null,
+        lastUpdate: state.lastUpdate || intelligence?.timestamp || null
+      };
+    })
+  ), [prisTrackedShips, sortedShips, routeIntelligenceByShip]);
+
+  useEffect(() => {
+    if (!liveInspected) return;
+    selectShipForIntelligence(liveInspected.id);
+  }, [liveInspected, selectShipForIntelligence]);
+
+  useEffect(() => {
+    if (!isReplaying || snapshots.length === 0) return undefined;
+    const id = setInterval(() => {
+      setPlaybackIndex((prev) => {
+        const next = prev < 0 ? 0 : prev + 1;
+        if (next >= snapshots.length) {
+          setIsReplaying(false);
+          return snapshots.length - 1;
+        }
+        return next;
+      });
+    }, Math.max(300, 1300 / playbackSpeed));
+    return () => clearInterval(id);
+  }, [isReplaying, snapshots, playbackSpeed]);
+
   return (
-    <div className="layout">
+    <div className={`layout ${isSidebarExpanded ? '' : 'collapsed'} op-${activeIncident?.severityLevel || 'normal'} ${emergencyBroadcast ? 'system-emergency' : ''}`}>
       {/* ─── LEFT SIDEBAR ─── */}
       <aside className="sidebar">
         <div className="sidebar-header">
           <div className="sidebar-brand">
-            <div className="sidebar-brand-icon">⚓</div>
+            <div 
+              className="sidebar-brand-icon" 
+              onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}
+              style={{ cursor: 'pointer' }}
+              title="Toggle Sidebar"
+            >
+              <img src="/favicon.ico?v=2" alt="Logo" width="22" height="22" />
+            </div>
             <h1>VesselSync</h1>
           </div>
           <div className="sidebar-status">
@@ -85,18 +285,28 @@ export default function CommandPage() {
           {sortedShips.map((ship) => (
             <div
               key={ship.id}
-              className={`ship-card ${inspectedShip?.id === ship.id ? 'active' : ''}`}
+              className={`ship-card ${inspectedShip?.id === ship.id ? 'active' : ''} severity-${ship.severityLevel}`}
               onClick={() => setInspectedShip(ship)}
             >
-              <div className={`ship-card-icon ${ship.status}`}>🚢</div>
+              <div className={`ship-card-icon ${ship.status} ${ship.severityLevel}`}>
+                {ship.severityLevel === 'emergency' ? '🚨' : ship.type === 'tanker' ? '🛢' : ship.type === 'patrol' ? '🛡' : '🚢'}
+              </div>
               <div className="ship-card-info">
                 <div className="ship-card-name">{ship.name}</div>
                 <div className="ship-card-meta">
                   <span>{ship.speed} kn</span>
                   <span>{fuelPct(ship)}% fuel</span>
+                  <span>{ship.heading}°</span>
+                </div>
+                <div className="ship-card-meta">
+                  <span>ETA {ship.etaMinutes}m</span>
+                  <span>SIG {ship.signalQuality}</span>
+                </div>
+                <div className="ship-progress">
+                  <div className="ship-progress-fill" style={{ width: `${ship.routeProgress}%` }} />
                 </div>
               </div>
-              <span className={`ship-card-status ${ship.status}`}>{ship.status}</span>
+              <span className={`ship-card-status ${ship.severityLevel}`}>{ship.severityLevel}</span>
             </div>
           ))}
         </div>
@@ -111,18 +321,142 @@ export default function CommandPage() {
 
       {/* ─── MAIN MAP AREA ─── */}
       <main className="main-content">
+        {emergencyBroadcast ? (
+          <div className="global-emergency-banner">
+            🚨 GLOBAL INTELLIGENCE ALERT • {emergencyBroadcast.shipId} • Risk {emergencyBroadcast.riskScore}% • {emergencyBroadcast.message}
+          </div>
+        ) : null}
         <div className="map-container">
           <FleetMap
-            ships={displayShips}
+            ships={renderedShips}
             zones={zones}
             role="command"
             onAddZone={addZone}
+            onSelectShip={(ship) => {
+              setInspectedShip(ship);
+              selectShipForIntelligence(ship.id);
+            }}
+            emergencyBroadcast={emergencyBroadcast}
+            tacticalInspection={tacticalInspection}
             onIssueDirective={(ship) => {
               setInspectedShip(ship);
               setSelectedShip(ship);
             }}
           />
         </div>
+
+        {activeIncident && (
+          <section className={`incident-focus-panel severity-${activeIncident.severityLevel}`}>
+            <div className="incident-focus-title">ACTIVE INCIDENT</div>
+            <div className="incident-focus-main">
+              <strong>{activeIncident.shipId || activeIncident.ship1Id}</strong>
+              <span>{activeIncident.type || 'threat'}</span>
+            </div>
+            <div className="incident-focus-meta">
+              <span>Severity: {activeIncident.severityLevel.toUpperCase()}</span>
+              <span>{new Date(activeIncident.createdAt || Date.now()).toLocaleTimeString()}</span>
+            </div>
+            <p>{activeIncident.message || 'An anomaly requires immediate command action.'}</p>
+            <div className="incident-focus-actions">
+              <button className="btn-primary" onClick={() => activeIncident.ship && setSelectedShip(activeIncident.ship)}>
+                Reroute Vessel
+              </button>
+              <button className="btn-danger" onClick={() => ackAlert(activeIncident.id)}>
+                Acknowledge Alert
+              </button>
+            </div>
+          </section>
+        )}
+
+        <section className="ai-command-panel">
+          <div className="ai-command-header">
+            <strong>AI Command Intelligence</strong>
+            <span>live telemetry analysis</span>
+          </div>
+          <div className="ai-streaming">AI analyzing telemetry...</div>
+          {aiRouteCard ? (
+            <article className={`ai-route-analysis severity-${aiRouteCard.routeRiskPct >= 75 ? 'critical' : aiRouteCard.routeRiskPct >= 45 ? 'warning' : 'normal'}`}>
+              <h4>AI ROUTE ANALYSIS</h4>
+              <div className="ai-route-threat">Threat Level: {aiRouteCard.threatLevel} ({aiRouteCard.routeRiskPct}%)</div>
+              <ul>
+                {aiRouteCard.threats.map((threat) => (
+                  <li key={threat}>{threat}{threat === 'Storm ahead' ? ` (ETA ${aiRouteCard.etaMinutes} min)` : ''}</li>
+                ))}
+              </ul>
+              <p>{aiRouteCard.recommendation}</p>
+              <div className="ai-route-footer">
+                <span>Confidence: {aiRouteCard.confidence}%</span>
+                <button
+                  className="btn-primary"
+                  onClick={() => {
+                    if (!tacticalInspection.ship) return;
+                    applyAiReroute(tacticalInspection.ship.id);
+                  }}
+                >
+                  Apply AI Reroute
+                </button>
+              </div>
+            </article>
+          ) : null}
+          <div className="ai-feed-list">
+            {aiFeed.map((item) => (
+              <article key={item.id} className={`ai-feed-card severity-${item.severity}`}>
+                <div className="ai-feed-top">
+                  <span>{item.threat}</span>
+                  <span>{item.confidence}%</span>
+                </div>
+                <p>{item.recommendation}</p>
+                <small>{new Date(item.timestamp).toLocaleTimeString()}</small>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="pris-ops-panel">
+          <div className="pris-ops-header">
+            <strong>PRIS Intelligence Control</strong>
+            <span>OPERATOR CONTROL + WORKLOAD MGMT</span>
+          </div>
+          <div className="pris-ops-stats">
+            <div><span>Active</span><strong>{prisSystemMetrics?.activePrisShips ?? 0}</strong></div>
+            <div><span>Avg Risk</span><strong>{prisSystemMetrics?.averageRiskScore ?? 0}%</strong></div>
+            <div><span>Emergencies</span><strong>{prisSystemMetrics?.emergencyEventsToday ?? 0}</strong></div>
+            <div>
+              <span>Load</span>
+              <strong className={`load-${prisSystemMetrics?.backendLoad || 'low'}`}>
+                {(prisSystemMetrics?.backendLoad || 'low').toUpperCase()}
+              </strong>
+            </div>
+          </div>
+          <div className="pris-ops-list">
+            {prisTrackedRows.length === 0 ? (
+              <p className="pris-empty">No tracked ships yet. Select a ship to activate PRIS monitoring.</p>
+            ) : (
+              prisTrackedRows.map((row) => (
+                <article key={row.shipId} className={`pris-ship-card ${row.active ? 'active' : 'paused'}`}>
+                  <div className="pris-ship-top">
+                    <strong>{row.shipName}</strong>
+                    <span>{row.riskScore == null ? '--' : `${row.riskScore}%`}</span>
+                  </div>
+                  <div className="pris-ship-meta">
+                    <span>{row.mode}</span>
+                    <span>{row.routeStatus}</span>
+                    <span>{row.lastUpdate ? new Date(row.lastUpdate).toLocaleTimeString() : 'No update'}</span>
+                  </div>
+                  <div className="pris-ship-actions">
+                    {row.active ? (
+                      <button className="btn-secondary" onClick={() => pausePrisShip(row.shipId)}>Pause</button>
+                    ) : (
+                      <button className="btn-secondary" onClick={() => resumePrisShip(row.shipId)}>Resume</button>
+                    )}
+                    <button className="btn-secondary" onClick={() => forceRecomputePrisShip(row.shipId)}>Recompute</button>
+                    <button className="btn-primary" onClick={() => deepScanPrisShip(row.shipId)}>AI Deep Scan</button>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </section>
 
         {/* ─── FLOATING TELEMETRY CARD ─── */}
         {liveInspected && (
@@ -213,6 +547,15 @@ export default function CommandPage() {
                   ? <strong>LIVE</strong>
                   : <strong>{new Date(snapshots[playbackIndex]?.timestamp).toLocaleTimeString()}</strong>}
               </span>
+              <button className="btn-secondary" onClick={() => {
+                setPlaybackIndex(Math.max(0, snapshots.length - 8));
+                setIsReplaying(true);
+              }}>
+                Replay Incident
+              </button>
+              <button className="btn-secondary" onClick={() => setIsReplaying((prev) => !prev)}>
+                {isReplaying ? 'Pause' : 'Play'}
+              </button>
               <input
                 type="range"
                 min="-1"
@@ -221,7 +564,26 @@ export default function CommandPage() {
                 onChange={(e) => setPlaybackIndex(Number(e.target.value))}
                 className="playback-slider"
               />
+              <select
+                value={playbackSpeed}
+                onChange={(e) => setPlaybackSpeed(Number(e.target.value))}
+                style={{ maxWidth: 84 }}
+              >
+                <option value={0.5}>0.5x</option>
+                <option value={1}>1x</option>
+                <option value={2}>2x</option>
+                <option value={4}>4x</option>
+              </select>
               <button className="btn-secondary" onClick={() => setPlaybackIndex(-1)}>Go Live</button>
+            </div>
+            <div className="playback-markers">
+              {snapshots.slice(-16).map((snapshot, idx) => (
+                <span
+                  key={snapshot.timestamp}
+                  className={`playback-marker ${idx % 5 === 0 ? 'alert' : ''}`}
+                  title={new Date(snapshot.timestamp).toLocaleTimeString()}
+                />
+              ))}
             </div>
           </footer>
         )}

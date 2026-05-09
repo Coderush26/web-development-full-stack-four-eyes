@@ -32,7 +32,10 @@ export default function CaptainPage() {
   return (
     <div className="captain-layout">
       <header className="topbar">
-        <h1>VesselSync - CAPTAIN TERMINAL</h1>
+        <h1 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <img src="/favicon.ico?v=2" alt="Logo" width="20" height="20" />
+          VesselSync - CAPTAIN TERMINAL
+        </h1>
         <div className={connected && backendHealthy ? 'status online' : 'status offline'}>
           {connected && backendHealthy ? 'Connected' : 'Disconnected'}
         </div>
