@@ -16,7 +16,7 @@ const PORTS = [
 ];
 
 export default function CommandPage() {
-  const { ships, alerts, zones, connected, ackAlert, addZone, sendDirective } = useFleetSocket();
+  const { ships, alerts, zones, connected, backendHealthy, ackAlert, addZone, updateZone, deleteZone, sendDirective } = useFleetSocket();
   const [selectedShip, setSelectedShip] = useState(null);
 
   useEffect(() => {
@@ -32,8 +32,8 @@ export default function CommandPage() {
     <div className="layout">
       <header className="topbar">
         <h1>VesselSync - FLEET COMMAND</h1>
-        <div className={connected ? 'status online' : 'status offline'}>
-          {connected ? 'Connected' : 'Disconnected'}
+        <div className={connected && backendHealthy ? 'status online' : 'status offline'}>
+          {connected && backendHealthy ? 'Connected' : 'Disconnected'}
         </div>
       </header>
 
@@ -44,6 +44,8 @@ export default function CommandPage() {
             zones={zones}
             role="command"
             onAddZone={addZone}
+            onUpdateZone={updateZone}
+            onDeleteZone={deleteZone}
             onIssueDirective={setSelectedShip}
           />
         </section>

@@ -4,8 +4,10 @@
   "description": "VesselSync real-time maritime fleet command system",
   "main": "server.js",
   "scripts": {
-    "dev": "node server.js",
-    "start": "NODE_ENV=production node server.js",
+    "dev": "next dev -p 3000",
+    "dev:backend": "node server.js",
+    "start": "next start -p 3000",
+    "start:backend": "NODE_ENV=production node server.js",
     "build": "next build"
   },
   "dependencies": {

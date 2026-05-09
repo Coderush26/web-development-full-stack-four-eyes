@@ -10,7 +10,7 @@ function severityScore(alert) {
 
 export default function AlertPanel({ alerts, onAck }) {
   const unacked = alerts
-    .filter((alert) => !alert.acked)
+    .filter((alert) => alert.status !== 'resolved')
     .sort((a, b) => severityScore(b) - severityScore(a));
 
   return (
@@ -19,12 +19,14 @@ export default function AlertPanel({ alerts, onAck }) {
       {unacked.length === 0 ? <p>No active alerts.</p> : null}
       {unacked.map((alert) => (
         <div className="alert-card" key={alert.id}>
-          <strong>{alert.zoneName ? 'Geofence Alert' : 'Proximity Alert'}</strong>
-          <div>{alert.zoneName ? `Ship ${alert.shipId} entered ${alert.zoneName}` : `${alert.ship1Id} near ${alert.ship2Id}`}</div>
+          <strong>{String(alert.type || 'alert').toUpperCase()}</strong>
+          <div>{alert.message || (alert.zoneName ? `Ship ${alert.shipId} entered ${alert.zoneName}` : `${alert.ship1Id} near ${alert.ship2Id}`)}</div>
           <small>{new Date(alert.timestamp || Date.now()).toLocaleTimeString()}</small>
-          <button className="btn-secondary" type="button" onClick={() => onAck(alert.id)}>
-            Acknowledge
-          </button>
+          {alert.status === 'active' ? (
+            <button className="btn-secondary" type="button" onClick={() => onAck(alert.id)}>
+              Acknowledge
+            </button>
+          ) : <small>{alert.status}</small>}
         </div>
       ))}
     </aside>
